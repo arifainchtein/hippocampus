@@ -3,6 +3,7 @@ package com.teleonome.hippocampus;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -32,6 +33,7 @@ import com.teleonome.framework.TeleonomeConstants;
 import com.teleonome.framework.denome.DenomeUtils;
 import com.teleonome.framework.denome.Identity;
 import com.teleonome.framework.exception.InvalidDenomeException;
+import com.teleonome.framework.persistence.PostgresqlPersistenceManager;
 import com.teleonome.framework.utils.Utils;
 
 public class Hippocampus {
@@ -47,13 +49,17 @@ public class Hippocampus {
 	private final java.util.concurrent.atomic.AtomicInteger totalPoints = new java.util.concurrent.atomic.AtomicInteger(0);
 	Logger logger;
 	long messageArrivedMillis=0;
-	
+	private JSONObject denomeJSONObject;
+	private PostgresqlPersistenceManager aDBManager;
+	private String teleonomeName;
+
 	public Hippocampus() {
 		String fileName =  "/home/pi/Teleonome/lib/Log4J.properties";
 		System.out.println("reading log4j file at " + fileName);
 		PropertyConfigurator.configure(fileName);
 		logger = Logger.getLogger(getClass());
 		this.shortTermMemory = new ConcurrentHashMap();
+		aDBManager = PostgresqlPersistenceManager.instance();
 		PingThread aPingThread = new PingThread();
 		aPingThread.start();
 	}
@@ -67,6 +73,120 @@ public class Hippocampus {
 		}
 	}
 
+	private void loadData() {
+		File denomeFile = new File(Utils.getLocalDirectory() + "Teleonome.denome");
+		Identity identity;
+		boolean validJSONFormat=false;
+
+		try{
+			String denomeFileInString = FileUtils.readFileToString(denomeFile, Charset.defaultCharset());
+			logger.info("line 82 checking the Teleonome.denome first, length=" + denomeFileInString.length() );
+			denomeJSONObject = new JSONObject(denomeFileInString);
+			validJSONFormat=true;
+
+			int timeRangeHours=48;
+			//
+			// get the data
+			//
+			ZoneId zone = ZoneId.of("Australia/Melbourne");
+			ZonedDateTime now = ZonedDateTime.now(zone);
+			ZonedDateTime overallStart = now.minusHours(timeRangeHours);
+
+			// Use the exact calculated start as our initial cursor
+			ZonedDateTime cursor = overallStart;
+
+			while (cursor.isBefore(now)) {
+				// Calculate the very end of 'this' specific day (23:59:59)
+				ZonedDateTime endOfThisDay = cursor.toLocalDate().atTime(23, 59, 59).atZone(zone);
+
+				// 1. Determine the START for this database call
+				// For the first loop, this is exactly 2:00 PM (or whatever minusHours results in)
+				long startTimeSeconds = cursor.toEpochSecond();
+
+				// 2. Determine the END for this database call
+				long endTimeSeconds;
+				// If 'now' is within this same day, end at 'now'. 
+				// Otherwise, end at the end of the calendar day.
+				if (now.isBefore(endOfThisDay)) {
+					endTimeSeconds = now.toEpochSecond();
+				} else {
+					endTimeSeconds = endOfThisDay.toEpochSecond();
+				}
+
+				// --- Logic to resolve Table Name and Query DB goes here ---
+				logger.debug("Processing: " + cursor.toLocalDate());
+				logger.debug("Start: " + startTimeSeconds + " | End: " + endTimeSeconds);
+
+				identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_DATA_DENE);
+				JSONObject dataDene =   DenomeUtils.getDeneByIdentity(denomeJSONObject, identity);
+				JSONArray dataDeneWords = dataDene.getJSONArray("DeneWords");
+				JSONObject storageDataDene;
+				String valueDenePointer, storeDataDeneWordName,storeDataDeneWordKey ;
+				Identity valueDenePointerIdentity;
+				JSONArray storageDataDeneWords;
+				Object storageDeneWordValue;
+				long dataValueSecondsTime;
+				Identity dataValueDeneChainIdentity;
+				JSONObject dataValueDeneChain, dataItemDatabaseDataPoint;
+				String telepathonName, deneName;
+				JSONArray dataItemDatabaseData;
+
+				for(int i=0;i<dataDeneWords.length();i++) {
+					//
+					// valueDenePointer contains something like "@ChinampaMonitor:Telepathons:Chinampa:Purpose"
+					valueDenePointer = dataDeneWords.getJSONObject(i).getString(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+					valueDenePointerIdentity = new Identity(valueDenePointer);
+					telepathonName=  valueDenePointerIdentity.deneChainName;
+					deneName=valueDenePointerIdentity.deneName;
+					logger.debug("line 140 valueDenePointer=" + valueDenePointer);
+					dataValueDeneChainIdentity = new Identity(valueDenePointerIdentity.getTeleonomeName(), valueDenePointerIdentity.nucleusName, valueDenePointerIdentity.deneChainName);
+					logger.debug("line 144 dataValueDeneChainIdentity=" + dataValueDeneChainIdentity.toString());
+					dataValueDeneChain =  (JSONObject) DenomeUtils.getDeneChainByIdentity(denomeJSONObject, dataValueDeneChainIdentity);
+					logger.debug("line 147 dataValueDeneChain=" + dataValueDeneChain.toString());
+
+					storageDataDene=  (JSONObject) DenomeUtils.getDeneByIdentity(denomeJSONObject, valueDenePointerIdentity);
+					storageDataDeneWords = storageDataDene.getJSONArray("DeneWords");
+					for(int j=0;j<storageDataDeneWords.length();j++) {
+						storeDataDeneWordName  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
+						storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
+						logger.debug("line 152 storeDataDeneWordKey=" + storeDataDeneWordKey);
+						dataItemDatabaseData= aDBManager.getTelepathonDeneWordStart(  telepathonName,  deneName,  storeDataDeneWordName,   startTimeSeconds,   endTimeSeconds);
+						logger.debug("line 154 dataItemDatabaseData=" + dataItemDatabaseData.length());
+
+						for(int k=0;k<dataItemDatabaseData.length();k++) {
+							dataItemDatabaseDataPoint = dataItemDatabaseData.getJSONObject(k);
+							dataValueSecondsTime = dataItemDatabaseDataPoint.getLong("timeSeconds");
+							storageDeneWordValue=dataItemDatabaseDataPoint.get("Value");
+							checkMemoryHealth();
+							TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, l -> {
+								return new TreeMap<Long, Object>();
+							});
+							logger.debug("line 163 storageDeneWordValue=" + storageDeneWordValue);
+							// 2. Add new point and increment counter
+							if(storageDeneWordValue!=null) {
+								history.put(dataValueSecondsTime, storageDeneWordValue);
+								totalPoints.incrementAndGet();
+								// 3. Normal Time-based Pruning (24h)
+								long dayAgo = dataValueSecondsTime - 86400L;
+								// Count how many we are about to remove for the global counter
+								int removedCount = history.headMap(dayAgo).size();
+								history.headMap(dayAgo).clear();
+								totalPoints.addAndGet(-removedCount);
+							}
+						}
+
+					}
+					// 3. Move the cursor to the START of the NEXT day (00:00:00)
+					// This ensures the NEXT iteration starts exactly at midnight
+					cursor = cursor.toLocalDate().plusDays(1).atStartOfDay(zone);
+				}
+
+			}
+		}catch(Exception e) {
+			logger.warn(Utils.getStringException(e));
+		}finally{
+		}
+	}
 	public void start() throws MqttException {
 		client = new MqttClient(broker, "Hippocampus_Organ", new MemoryPersistence());
 		MqttConnectOptions options = new MqttConnectOptions();
@@ -91,7 +211,7 @@ public class Hippocampus {
 			}
 			@Override
 			public void deliveryComplete(IMqttDeliveryToken token) {}
-		
+
 		});
 
 		client.connect(options);
@@ -103,19 +223,17 @@ public class Hippocampus {
 		try {
 			JSONObject denomeJSONObject = new JSONObject(pulseJson);
 			JSONObject denomeObject = denomeJSONObject.getJSONObject("Denome");
-			String teleonomeName = denomeObject.getString("Name");
+			teleonomeName = denomeObject.getString("Name");
 			Identity identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_CONFIGURATION, TeleonomeConstants.DENE_HIPPOCAMPUS_GLOBAL_LIMITS);
 			globalLimit =  (Integer) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
-
-			 identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_CONFIGURATION, TeleonomeConstants.DENE_HIPPOCAMPUS_WARNING_THRESHOLD);
+			identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_CONFIGURATION, TeleonomeConstants.DENE_HIPPOCAMPUS_WARNING_THRESHOLD);
 			warningThreshold =  (Integer) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
-			
-			logger.debug("line 100 globalLimit=" + globalLimit + " warningThreshold= " + warningThreshold);
+			logger.debug("line 232 globalLimit=" + globalLimit + " warningThreshold= " + warningThreshold);
 			//
 			// get the data to store, which are the denewords in the "Data" dene of
 			// 
 			//
-			 identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_DATA_DENE);
+			identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_DATA_DENE);
 			JSONObject dataDene =   DenomeUtils.getDeneByIdentity(denomeJSONObject, identity);
 			JSONArray dataDeneWords = dataDene.getJSONArray("DeneWords");
 			JSONObject storageDataDene;
@@ -126,36 +244,36 @@ public class Hippocampus {
 			long dataValueSecondsTime;
 			Identity dataValueDeneChainIdentity;
 			JSONObject dataValueDeneChain;
-			
+
 			for(int i=0;i<dataDeneWords.length();i++) {
 				//
 				// valueDenePointer contains something like "@ChinampaMonitor:Telepathons:Chinampa:Purpose"
 				valueDenePointer = dataDeneWords.getJSONObject(i).getString(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
 				valueDenePointerIdentity = new Identity(valueDenePointer);
-				logger.debug("line 134 valueDenePointer=" + valueDenePointer);
+				logger.debug("line 254 valueDenePointer=" + valueDenePointer);
 				dataValueDeneChainIdentity = new Identity(valueDenePointerIdentity.getTeleonomeName(), valueDenePointerIdentity.nucleusName, valueDenePointerIdentity.deneChainName);
-				
-				logger.debug("line 137 dataValueDeneChainIdentity=" + dataValueDeneChainIdentity.toString());
+
+				logger.debug("line 257 dataValueDeneChainIdentity=" + dataValueDeneChainIdentity.toString());
 				dataValueDeneChain =  (JSONObject) DenomeUtils.getDeneChainByIdentity(denomeJSONObject, dataValueDeneChainIdentity);
-				
+
 				if(dataValueDeneChain!=null && dataValueDeneChain.has("Seconds Time")) {
-					logger.debug("line 139 dataValueDeneChain=" + dataValueDeneChain.toString());
+					logger.debug("line 261 dataValueDeneChain=" + dataValueDeneChain.toString());
 					dataValueSecondsTime = dataValueDeneChain.getLong("Seconds Time");
-					logger.debug("line 142 dataValueSecondsTime=" + dataValueSecondsTime);
+					logger.debug("line 263 dataValueSecondsTime=" + dataValueSecondsTime);
 					storageDataDene=  (JSONObject) DenomeUtils.getDeneByIdentity(denomeJSONObject, valueDenePointerIdentity);
 					storageDataDeneWords = storageDataDene.getJSONArray("DeneWords");
 					for(int j=0;j<storageDataDeneWords.length();j++) {
 						storeDataDeneWordName  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
 						storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
-						logger.debug("line 148 storeDataDeneWordKey=" + storeDataDeneWordKey);
-						
+						logger.debug("line 269 storeDataDeneWordKey=" + storeDataDeneWordKey);
+
 						checkMemoryHealth();
 						TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, k -> {
 							return new TreeMap<Long, Object>();
 						});
 						identity = new Identity(storeDataDeneWordKey);
 						storageDeneWordValue =    DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
-						logger.debug("line 156 storageDeneWordValue=" + storageDeneWordValue);
+						logger.debug("line 277 storageDeneWordValue=" + storageDeneWordValue);
 						// 2. Add new point and increment counter
 						if(storageDeneWordValue!=null) {
 							history.put(dataValueSecondsTime, storageDeneWordValue);
@@ -167,12 +285,12 @@ public class Hippocampus {
 							history.headMap(dayAgo).clear();
 							totalPoints.addAndGet(-removedCount);
 						}
-						
+
 					}
 				}else {
 					logger.warn("The denechain with identity " + dataValueDeneChainIdentity + " does not have Seconds Time, dataValueDeneChain=" + dataValueDeneChain);
 				}
-				
+
 			}
 		} catch (Exception e) {
 			logger.warn(Utils.getStringException(e));
@@ -180,12 +298,12 @@ public class Hippocampus {
 	}
 
 	private JSONObject generateHippocampusStatusDene() {
-		  JSONObject hippocampusStatusDene = new JSONObject();
-	    try {
-	        int current = totalPoints.get();
-	        double percentUsed = ((double) current / globalLimit) * 100;
-	        int available = globalLimit - current;
- 	        hippocampusStatusDene.put("Name", TeleonomeConstants.DENE_HIPPOCAMPUS_MEMORY_STATUS_DENE);
+		JSONObject hippocampusStatusDene = new JSONObject();
+		try {
+			int current = totalPoints.get();
+			double percentUsed = ((double) current / globalLimit) * 100;
+			int available = globalLimit - current;
+			hippocampusStatusDene.put("Name", TeleonomeConstants.DENE_HIPPOCAMPUS_MEMORY_STATUS_DENE);
 			JSONArray hippocampusDeneWords = new JSONArray();
 			LocalDateTime currentTime = LocalDateTime.now();
 			DateTimeFormatter formatter = DateTimeFormatter.ofPattern(TeleonomeConstants.MNEMOSYNE_TIME_FORMAT);
@@ -203,54 +321,54 @@ public class Hippocampus {
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("Status", percentUsed > 100*(warningThreshold/globalLimit) ? "Critical" : "Ok" ,null,"String",true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-	        
-	    } catch (Exception e) {
-	        System.err.println("Could not broadcast health: " + e.getMessage());
-	    }
-	    return hippocampusStatusDene;
+
+		} catch (Exception e) {
+			System.err.println("Could not broadcast health: " + e.getMessage());
+		}
+		return hippocampusStatusDene;
 	}
-	
+
 	private void broadcastHealth() {
-	    try {
-	    	 JSONObject hippocampusStatusDene= generateHippocampusStatusDene();
-	        MqttMessage message = new MqttMessage(hippocampusStatusDene.toString().getBytes());
-	        message.setQos(0); // Low priority, no need to retry
-	        client.publish("Hippocampus_Status", message);
-	        
-	    } catch (Exception e) {
-	        System.err.println("Could not broadcast health: " + e.getMessage());
-	    }
+		try {
+			JSONObject hippocampusStatusDene= generateHippocampusStatusDene();
+			MqttMessage message = new MqttMessage(hippocampusStatusDene.toString().getBytes());
+			message.setQos(0); // Low priority, no need to retry
+			client.publish("Hippocampus_Status", message);
+
+		} catch (Exception e) {
+			System.err.println("Could not broadcast health: " + e.getMessage());
+		}
 	}
-	
+
 	class PingThread extends Thread{
-	     
-	    public PingThread(){
-	        setDaemon(true);
-	    }
-	    public void run(){
-	        while(true) {
-	        	 JSONObject hippocampusStatusDene= generateHippocampusStatusDene();
-	        	 try {
-	        		 logger.debug("about to save status file");
+
+		public PingThread(){
+			setDaemon(true);
+		}
+		public void run(){
+			while(true) {
+				JSONObject hippocampusStatusDene= generateHippocampusStatusDene();
+				try {
+					logger.debug("about to save status file");
 					FileUtils.writeStringToFile(new File("/home/pi/Teleonome/HippocampusStatus.json"), hippocampusStatusDene.toString());
-	        		 logger.debug("about to broadcasthealth");
-					 broadcastHealth();
+					logger.debug("about to broadcasthealth");
+					broadcastHealth();
 				} catch (IOException e) {
 					// TODO Auto-generated catch block
 					logger.warn(Utils.getStringException(e));
 				}
-		        try {
+				try {
 					Thread.sleep(1000*30);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
 				}
-	        }
-	    	
-	    }
-	    
+			}
+
+		}
+
 	}
-	
+
 	private void checkMemoryHealth() {
 		int currentSize = totalPoints.get();
 		if (currentSize > globalLimit) {
@@ -280,7 +398,7 @@ public class Hippocampus {
 			String range = req.optString("Range", "24h");
 			ZoneId melbourneZone = ZoneId.of("Australia/Melbourne");
 			DateTimeFormatter pgFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ssX")
-                    .withZone(melbourneZone);
+					.withZone(melbourneZone);
 			ZonedDateTime zdt;
 			TreeMap history = (TreeMap) shortTermMemory.get(id);
 			if (history != null && !history.isEmpty()) {
@@ -294,11 +412,11 @@ public class Hippocampus {
 				long timeSeconds;
 				String timeString;
 				for (Object entryObj : slice.entrySet()) {
-					
+
 					Map.Entry entry = (Map.Entry) entryObj;
 					timeSeconds = (long) entry.getKey();
-					  zdt = Instant.ofEpochMilli(timeSeconds).atZone(melbourneZone);
-					    timeString = zdt.format(pgFormatter);
+					zdt = Instant.ofEpochMilli(timeSeconds).atZone(melbourneZone);
+					timeString = zdt.format(pgFormatter);
 
 					j = new JSONObject();
 					j.put("timeSeconds", timeSeconds);
@@ -314,9 +432,9 @@ public class Hippocampus {
 				client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(response.toString().getBytes()));
 			}
 		} catch (Exception e) {
-			e.printStackTrace();
+			logger.warn(Utils.getStringException(e));
 		}
 	}
 
-	
+
 }
