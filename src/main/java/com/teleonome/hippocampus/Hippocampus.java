@@ -3,7 +3,10 @@ package com.teleonome.hippocampus;
 
 import java.io.File;
 import java.io.IOException;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -272,29 +275,43 @@ public class Hippocampus {
 	private void processRequest(String requestJson) {
 		try {
 			JSONObject req = new JSONObject(requestJson);
+			logger.debug("line 275, request received=" +req.toString() );
 			String id = req.getString("Identity");
 			String range = req.optString("Range", "24h");
-
+			ZoneId melbourneZone = ZoneId.of("Australia/Melbourne");
+			DateTimeFormatter pgFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ssX")
+                    .withZone(melbourneZone);
+			ZonedDateTime zdt;
 			TreeMap history = (TreeMap) shortTermMemory.get(id);
 			if (history != null && !history.isEmpty()) {
 				long now = System.currentTimeMillis();
-				long startTs = range.equals("lastHour") ? (now - 3600000L) : (now - 86400000L);
-
+				long startTs = range.equals("lastHour") ? (now - 3600L) : (now - 86400L);
+				logger.debug("line 283, startTs=" +startTs );
 				NavigableMap slice = history.tailMap(startTs, true);
 				JSONArray data = new JSONArray();
-
+				logger.debug("line 283, slice=" +slice.size() );
+				JSONObject j;
+				long timeSeconds;
+				String timeString;
 				for (Object entryObj : slice.entrySet()) {
+					
 					Map.Entry entry = (Map.Entry) entryObj;
-					data.put(new JSONObject()
-							.put("t", entry.getKey())
-							.put("v", entry.getValue()));
+					timeSeconds = (long) entry.getKey();
+					  zdt = Instant.ofEpochMilli(timeSeconds).atZone(melbourneZone);
+					    timeString = zdt.format(pgFormatter);
+
+					j = new JSONObject();
+					j.put("timeSeconds", timeSeconds);
+					j.put("timeString", timeString);
+					j.put("Value", entry.getValue());
+					data.put(j);
 				}
 
 				JSONObject response = new JSONObject();
 				response.put("Identity", id);
 				response.put("Data", data);
 
-				client.publish("Hippocampus_Response", new MqttMessage(response.toString().getBytes()));
+				client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(response.toString().getBytes()));
 			}
 		} catch (Exception e) {
 			e.printStackTrace();
