@@ -131,35 +131,41 @@ public class Hippocampus {
 				// valueDenePointer contains something like "@ChinampaMonitor:Telepathons:Chinampa:Purpose"
 				valueDenePointer = dataDeneWords.getJSONObject(i).getString(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
 				valueDenePointerIdentity = new Identity(valueDenePointer);
-				logger.debug("line 123 valueDenePointer=" + valueDenePointer);
+				logger.debug("line 134 valueDenePointer=" + valueDenePointer);
 				dataValueDeneChainIdentity = new Identity(valueDenePointerIdentity.getTeleonomeName(), valueDenePointerIdentity.nucleusName, valueDenePointerIdentity.deneChainName);
 				dataValueDeneChain =  (JSONObject) DenomeUtils.getDeneChainByIdentity(denomeJSONObject, dataValueDeneChainIdentity);
-				dataValueSecondsTime = dataValueDeneChain.getLong("Seconds Time");
-				logger.debug("line 127 dataValueSecondsTime=" + dataValueSecondsTime);
-				storageDataDene=  (JSONObject) DenomeUtils.getDeneByIdentity(denomeJSONObject, identity);
-				storageDataDeneWords = storageDataDene.getJSONArray("DeneWords");
-				for(int j=0;j<storageDataDeneWords.length();j++) {
-					storeDataDeneWordName  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
-					storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
-					logger.debug("line 133 storeDataDeneWordKey=" + storeDataDeneWordKey);
-					
-					checkMemoryHealth();
-					TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, k -> {
-						return new TreeMap<Long, Object>();
-					});
-					storeDataDeneWordIdentity = new Identity(storeDataDeneWordKey);
-					storageDeneWordValue =    DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
-					logger.debug("line 141 storageDeneWordValue=" + storageDeneWordValue);
-					// 2. Add new point and increment counter
-					history.put(dataValueSecondsTime, storageDeneWordValue);
-					totalPoints.incrementAndGet();
-					// 3. Normal Time-based Pruning (24h)
-					long dayAgo = dataValueSecondsTime - 86400L;
-					// Count how many we are about to remove for the global counter
-					int removedCount = history.headMap(dayAgo).size();
-					history.headMap(dayAgo).clear();
-					totalPoints.addAndGet(-removedCount);
+				logger.debug("line 137 dataValueDeneChain=" + dataValueDeneChain.toString());
+				if(dataValueDeneChain.has("Seconds Time")) {
+					dataValueSecondsTime = dataValueDeneChain.getLong("Seconds Time");
+					logger.debug("line 139 dataValueSecondsTime=" + dataValueSecondsTime);
+					storageDataDene=  (JSONObject) DenomeUtils.getDeneByIdentity(denomeJSONObject, identity);
+					storageDataDeneWords = storageDataDene.getJSONArray("DeneWords");
+					for(int j=0;j<storageDataDeneWords.length();j++) {
+						storeDataDeneWordName  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
+						storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
+						logger.debug("line 133 storeDataDeneWordKey=" + storeDataDeneWordKey);
+						
+						checkMemoryHealth();
+						TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, k -> {
+							return new TreeMap<Long, Object>();
+						});
+						storeDataDeneWordIdentity = new Identity(storeDataDeneWordKey);
+						storageDeneWordValue =    DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+						logger.debug("line 141 storageDeneWordValue=" + storageDeneWordValue);
+						// 2. Add new point and increment counter
+						history.put(dataValueSecondsTime, storageDeneWordValue);
+						totalPoints.incrementAndGet();
+						// 3. Normal Time-based Pruning (24h)
+						long dayAgo = dataValueSecondsTime - 86400L;
+						// Count how many we are about to remove for the global counter
+						int removedCount = history.headMap(dayAgo).size();
+						history.headMap(dayAgo).clear();
+						totalPoints.addAndGet(-removedCount);
+					}
+				}else {
+					logger.warn("The denechain with identity " + dataValueDeneChainIdentity + " does not have Seconds Time, dataValueDeneChain=" + dataValueDeneChain.toString(4));
 				}
+				
 			}
 		} catch (Exception e) {
 			logger.warn(Utils.getStringException(e));
