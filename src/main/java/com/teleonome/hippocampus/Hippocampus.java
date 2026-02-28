@@ -136,8 +136,9 @@ public class Hippocampus {
 				
 				logger.debug("line 137 dataValueDeneChainIdentity=" + dataValueDeneChainIdentity.toString());
 				dataValueDeneChain =  (JSONObject) DenomeUtils.getDeneChainByIdentity(denomeJSONObject, dataValueDeneChainIdentity);
-				logger.debug("line 139 dataValueDeneChain=" + dataValueDeneChain.toString());
+				
 				if(dataValueDeneChain!=null && dataValueDeneChain.has("Seconds Time")) {
+					logger.debug("line 139 dataValueDeneChain=" + dataValueDeneChain.toString());
 					dataValueSecondsTime = dataValueDeneChain.getLong("Seconds Time");
 					logger.debug("line 142 dataValueSecondsTime=" + dataValueSecondsTime);
 					storageDataDene=  (JSONObject) DenomeUtils.getDeneByIdentity(denomeJSONObject, identity);
