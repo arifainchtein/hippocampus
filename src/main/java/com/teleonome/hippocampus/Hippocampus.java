@@ -166,7 +166,7 @@ public class Hippocampus {
 						totalPoints.addAndGet(-removedCount);
 					}
 				}else {
-					logger.warn("The denechain with identity " + dataValueDeneChainIdentity + " does not have Seconds Time, dataValueDeneChain=" + dataValueDeneChain.toString(4));
+					logger.warn("The denechain with identity " + dataValueDeneChainIdentity + " does not have Seconds Time, dataValueDeneChain=" + dataValueDeneChain);
 				}
 				
 			}
