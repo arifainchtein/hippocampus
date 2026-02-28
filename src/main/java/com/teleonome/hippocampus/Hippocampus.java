@@ -154,14 +154,17 @@ public class Hippocampus {
 						storageDeneWordValue =    DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
 						logger.debug("line 156 storageDeneWordValue=" + storageDeneWordValue);
 						// 2. Add new point and increment counter
-						history.put(dataValueSecondsTime, storageDeneWordValue);
-						totalPoints.incrementAndGet();
-						// 3. Normal Time-based Pruning (24h)
-						long dayAgo = dataValueSecondsTime - 86400L;
-						// Count how many we are about to remove for the global counter
-						int removedCount = history.headMap(dayAgo).size();
-						history.headMap(dayAgo).clear();
-						totalPoints.addAndGet(-removedCount);
+						if(storageDeneWordValue!=null) {
+							history.put(dataValueSecondsTime, storageDeneWordValue);
+							totalPoints.incrementAndGet();
+							// 3. Normal Time-based Pruning (24h)
+							long dayAgo = dataValueSecondsTime - 86400L;
+							// Count how many we are about to remove for the global counter
+							int removedCount = history.headMap(dayAgo).size();
+							history.headMap(dayAgo).clear();
+							totalPoints.addAndGet(-removedCount);
+						}
+						
 					}
 				}else {
 					logger.warn("The denechain with identity " + dataValueDeneChainIdentity + " does not have Seconds Time, dataValueDeneChain=" + dataValueDeneChain);
