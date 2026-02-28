@@ -139,7 +139,7 @@ public class Hippocampus {
 					logger.debug("line 139 dataValueDeneChain=" + dataValueDeneChain.toString());
 					dataValueSecondsTime = dataValueDeneChain.getLong("Seconds Time");
 					logger.debug("line 142 dataValueSecondsTime=" + dataValueSecondsTime);
-					storageDataDene=  (JSONObject) DenomeUtils.getDeneByIdentity(denomeJSONObject, identity);
+					storageDataDene=  (JSONObject) DenomeUtils.getDeneByIdentity(denomeJSONObject, valueDenePointerIdentity);
 					storageDataDeneWords = storageDataDene.getJSONArray("DeneWords");
 					for(int j=0;j<storageDataDeneWords.length();j++) {
 						storeDataDeneWordName  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
@@ -298,37 +298,5 @@ public class Hippocampus {
 		}
 	}
 
-	private Object resolveValueByIdentity(JSONObject pulseBody, String identity) {
-		try {
-			String[] parts = identity.substring(1).split(":");
-			JSONObject denome = pulseBody.getJSONObject("Denome");
-			JSONArray sectors = denome.getJSONArray("Sectors");
-
-			for (int i = 0; i < sectors.length(); i++) {
-				JSONObject sector = sectors.getJSONObject(i);
-				if (sector.getString("Name").equals(parts[1])) {
-					JSONArray chains = sector.getJSONArray("DeneChains");
-					for (int j = 0; j < chains.length(); j++) {
-						JSONObject chain = chains.getJSONObject(j);
-						if (chain.getString("Name").equals(parts[2])) {
-							JSONArray denes = chain.getJSONArray("Denes");
-							for (int k = 0; k < denes.length(); k++) {
-								JSONObject dene = denes.getJSONObject(k);
-								if (dene.getString("Name").equals(parts[3])) {
-									JSONArray words = dene.getJSONArray("DeneWords");
-									for (int l = 0; l < words.length(); l++) {
-										JSONObject word = words.getJSONObject(l);
-										if (word.getString("Name").equals(parts[4])) {
-											return word.get("Value");
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		} catch (Exception e) {}
-		return null;
-	}
+	
 }
