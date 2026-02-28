@@ -1,5 +1,6 @@
 package com.teleonome.hippocampus;
 
+
 import java.io.File;
 import java.io.IOException;
 import java.time.LocalDateTime;
@@ -160,7 +161,9 @@ public class Hippocampus {
 					totalPoints.addAndGet(-removedCount);
 				}
 			}
-		} catch (Exception e) {}
+		} catch (Exception e) {
+			logger.warn(Utils.getStringException(e));
+		}
 	}
 
 	private JSONObject generateHippocampusStatusDene() {
