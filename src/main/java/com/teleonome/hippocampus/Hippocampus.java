@@ -40,7 +40,6 @@ public class Hippocampus {
 	private  int globalLimit = 50000; 
 	//Threshold to start warning (90% of limit)
 	private int warningThreshold = 45000; 
-	private boolean prunningActive=false;
 	//Atomic counter to track total points in RAM
 	private final java.util.concurrent.atomic.AtomicInteger totalPoints = new java.util.concurrent.atomic.AtomicInteger(0);
 	Logger logger;
@@ -116,14 +115,13 @@ public class Hippocampus {
 			 identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_DATA_DENE);
 			JSONObject dataDene =   DenomeUtils.getDeneByIdentity(denomeJSONObject, identity);
 			JSONArray dataDeneWords = dataDene.getJSONArray("DeneWords");
-			JSONObject dataDeneWord, storageDataDene;
+			JSONObject storageDataDene;
 			String valueDenePointer, storeDataDeneWordName,storeDataDeneWordKey ;
-			Identity storeDataDeneWordIdentity, valueDenePointerIdentity;
+			Identity valueDenePointerIdentity;
 			JSONArray storageDataDeneWords;
-			JSONObject storageDeneWord;
 			Object storageDeneWordValue;
 			long dataValueSecondsTime;
-			Identity dataValueSecondsTimeIdentity, dataValueDeneChainIdentity;
+			Identity dataValueDeneChainIdentity;
 			JSONObject dataValueDeneChain;
 			
 			for(int i=0;i<dataDeneWords.length();i++) {
@@ -152,7 +150,7 @@ public class Hippocampus {
 						TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, k -> {
 							return new TreeMap<Long, Object>();
 						});
-						storeDataDeneWordIdentity = new Identity(storeDataDeneWordKey);
+						new Identity(storeDataDeneWordKey);
 						storageDeneWordValue =    DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
 						logger.debug("line 156 storageDeneWordValue=" + storageDeneWordValue);
 						// 2. Add new point and increment counter
@@ -229,6 +227,8 @@ public class Hippocampus {
 	        	 try {
 	        		 logger.debug("about to save status file");
 					FileUtils.writeStringToFile(new File("/home/pi/Teleonome/HippocampusStatus.json"), hippocampusStatusDene.toString());
+	        		 logger.debug("about to broadcasthealth");
+					 broadcastHealth();
 				} catch (IOException e) {
 					// TODO Auto-generated catch block
 					logger.warn(Utils.getStringException(e));
@@ -247,11 +247,9 @@ public class Hippocampus {
 	
 	private void checkMemoryHealth() {
 		int currentSize = totalPoints.get();
-		prunningActive=false;
 		if (currentSize > globalLimit) {
 			System.out.println("CRITICAL: Memory Limit Exceeded (" + currentSize + "). Emergency Pruning...");
 			emergencyPrune();
-			prunningActive=true;
 		} else if (currentSize > warningThreshold) {
 			System.out.println("WARNING: Hippocampus is 90% full. Current points: " + currentSize);
 		}
