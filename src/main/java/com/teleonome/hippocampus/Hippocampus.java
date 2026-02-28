@@ -62,6 +62,7 @@ public class Hippocampus {
 		aDBManager = PostgresqlPersistenceManager.instance();
 		PingThread aPingThread = new PingThread();
 		aPingThread.start();
+		
 	}
 
 	public static void main(String[] args) {
@@ -218,6 +219,8 @@ public class Hippocampus {
 		client.subscribe("Status", 1);
 		client.subscribe("Hippocampus_Request", 1);
 		logger.info("Hippocampus Active.");
+		
+		loadData();
 	}
 	private void absorbPulse(String pulseJson) {
 		try {
