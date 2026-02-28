@@ -150,7 +150,7 @@ public class Hippocampus {
 						TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, k -> {
 							return new TreeMap<Long, Object>();
 						});
-						new Identity(storeDataDeneWordKey);
+						identity = new Identity(storeDataDeneWordKey);
 						storageDeneWordValue =    DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
 						logger.debug("line 156 storageDeneWordValue=" + storageDeneWordValue);
 						// 2. Add new point and increment counter
