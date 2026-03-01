@@ -448,7 +448,7 @@ public class Hippocampus {
 			String telepathonName=identity.deneChainName;
 			String deneWordName = identity.deneWordName;
 			
-			String range = req.optString("Range", "24h");
+			int range = req.getInt("Range");
 			ZoneId melbourneZone = ZoneId.of("Australia/Melbourne");
 			DateTimeFormatter pgFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 					.withZone(melbourneZone);
@@ -456,7 +456,7 @@ public class Hippocampus {
 			TreeMap history = (TreeMap) shortTermMemory.get(id);
 			if (history != null && !history.isEmpty()) {
 				long now = System.currentTimeMillis()/1000;
-				long startTs = range.equals("lastHour") ? (now - 3600L) : (now - 2*86400L);
+				long startTs = (now - range*3600L);
 				logger.debug("line 453, startTs=" +startTs );
 				NavigableMap slice = history.tailMap(startTs, true);
 			
