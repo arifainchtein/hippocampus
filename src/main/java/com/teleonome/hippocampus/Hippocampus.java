@@ -78,7 +78,7 @@ public class Hippocampus {
 		File denomeFile = new File(Utils.getLocalDirectory() + "Teleonome.denome");
 		Identity identity;
 		boolean validJSONFormat=false;
-
+		long now=System.currentTimeMillis();
 		try{
 			String denomeFileInString = FileUtils.readFileToString(denomeFile, Charset.defaultCharset());
 			logger.info("line 82 checking the Teleonome.denome first, length=" + denomeFileInString.length() );
@@ -190,6 +190,8 @@ public class Hippocampus {
 			logger.warn(Utils.getStringException(e));
 		}finally{
 		}
+		int duration = (int) ((System.currentTimeMillis()-now)/1000);
+		logger.debug("Finished loading data, it took " + Utils.getElapsedSecondsToHoursMinutesSecondsString(duration));
 	}
 	public void start() throws MqttException {
 		client = new MqttClient(broker, "Hippocampus_Organ", new MemoryPersistence());
