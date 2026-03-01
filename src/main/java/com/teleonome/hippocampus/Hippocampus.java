@@ -346,7 +346,7 @@ public class Hippocampus {
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("PercentageUsed",  Math.round(percentUsed * 100.0) / 100.0 ,null,"double",true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("Status", percentUsed > 100*(warningThreshold/globalLimit) ? "Critical" : "Ok" ,null,"String",true);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("Status", (percentUsed > (100*(warningThreshold/globalLimit))) ? "Critical" : "Ok" ,null,"String",true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 			
 			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_DATA, preLoadData ,null,"boolean",true);
