@@ -449,7 +449,7 @@ public class Hippocampus {
 			
 			String range = req.optString("Range", "24h");
 			ZoneId melbourneZone = ZoneId.of("Australia/Melbourne");
-			DateTimeFormatter pgFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ssX")
+			DateTimeFormatter pgFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 					.withZone(melbourneZone);
 			ZonedDateTime zdt;
 			TreeMap history = (TreeMap) shortTermMemory.get(id);
