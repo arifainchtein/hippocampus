@@ -443,6 +443,7 @@ public class Hippocampus {
 			JSONObject req = new JSONObject(requestJson);
 			logger.debug("line 441, request received=" +req.toString() );
 			String id = req.getString("Identity");
+			String requestId = req.optString("RequestId", "default");
 			Identity identity = new Identity(id);
 			String telepathonName=identity.deneChainName;
 			String deneWordName = identity.deneWordName;
@@ -480,8 +481,10 @@ public class Hippocampus {
 				response.put("Data", data);
 				response.put("telepathonName", telepathonName);
 				response.put("deneWordName", deneWordName);
+				response.put("RequestId", requestId);
 			}
-			client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(response.toString().getBytes()));
+			String destination =TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE+ requestId;
+			client.publish(destination, new MqttMessage(response.toString().getBytes()));
 		//	client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(data.toString().getBytes()));
 			logger.debug("response sent" );
 		} catch (Exception e) {
