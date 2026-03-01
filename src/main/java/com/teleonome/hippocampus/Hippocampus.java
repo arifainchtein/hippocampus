@@ -437,6 +437,7 @@ public class Hippocampus {
 		}
 	}
 	private void processRequest(String requestJson) {
+		JSONArray data = new JSONArray();
 		try {
 			JSONObject response = new JSONObject();
 			JSONObject req = new JSONObject(requestJson);
@@ -453,7 +454,7 @@ public class Hippocampus {
 				long startTs = range.equals("lastHour") ? (now - 3600L) : (now - 86400L);
 				logger.debug("line 453, startTs=" +startTs );
 				NavigableMap slice = history.tailMap(startTs, true);
-				JSONArray data = new JSONArray();
+			
 				logger.debug("line 455, slice=" +slice.size() );
 				JSONObject j;
 				long timeSeconds;
@@ -474,7 +475,8 @@ public class Hippocampus {
 				response.put("Identity", id);
 				response.put("Data", data);
 			}
-			client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(response.toString().getBytes()));
+	//		client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(response.toString().getBytes()));
+			client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(data.toString().getBytes()));
 			logger.debug("response sent" );
 		} catch (Exception e) {
 			logger.warn(Utils.getStringException(e));
