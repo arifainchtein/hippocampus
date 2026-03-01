@@ -377,7 +377,8 @@ public class Hippocampus {
 		try {
 			JSONObject hippocampusStatusDene= generateHippocampusStatusDene();
 			MqttMessage message = new MqttMessage(hippocampusStatusDene.toString().getBytes());
-			message.setQos(0); // Low priority, no need to retry
+			 message.setQos(TeleonomeConstants.HEART_QUALITY_OF_SERVICE);
+			 message.setRetained(false);
 			client.publish("Hippocampus_Status", message);
 
 		} catch (Exception e) {
