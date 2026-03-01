@@ -459,7 +459,7 @@ public class Hippocampus {
 				String timeString;
 				for (Object entryObj : slice.entrySet()) {
 					Map.Entry entry = (Map.Entry) entryObj;
-					timeSeconds = (long) entry.getKey();
+					timeSeconds = 1000*(long)entry.getKey();
 					zdt = Instant.ofEpochMilli(timeSeconds).atZone(melbourneZone);
 					timeString = zdt.format(pgFormatter);
 
