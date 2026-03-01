@@ -449,6 +449,8 @@ public class Hippocampus {
 			String deneWordName = identity.deneWordName;
 			
 			int range = req.getInt("Range");
+			logger.debug("line 453, Range=" +Range );
+			
 			ZoneId melbourneZone = ZoneId.of("Australia/Melbourne");
 			DateTimeFormatter pgFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 					.withZone(melbourneZone);
@@ -457,10 +459,10 @@ public class Hippocampus {
 			if (history != null && !history.isEmpty()) {
 				long now = System.currentTimeMillis()/1000;
 				long startTs = (now - range*3600L);
-				logger.debug("line 453, startTs=" +startTs );
+				logger.debug("line 462, startTs=" +startTs );
 				NavigableMap slice = history.tailMap(startTs, true);
 			
-				logger.debug("line 455, slice=" +slice.size() );
+				logger.debug("line 465, slice=" +slice.size() );
 				JSONObject j;
 				long timeSeconds;
 				String timeString;
@@ -475,7 +477,7 @@ public class Hippocampus {
 					j.put("timeString", timeString);
 					j.put("Value", entry.getValue());
 					data.put(j);
-					logger.debug("line 471, j=" +j.toString() );
+					logger.debug("line 480, j=" +j.toString() );
 				}
 				response.put("Identity", id);
 				response.put("Data", data);
