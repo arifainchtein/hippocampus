@@ -356,7 +356,7 @@ public class Hippocampus {
 				JSONObject hippocampusStatusDene= generateHippocampusStatusDene();
 				try {
 					logger.debug("about to save status file");
-					FileUtils.writeStringToFile(new File("/home/pi/Teleonome/HippocampusStatus.json"), hippocampusStatusDene.toString());
+					FileUtils.writeStringToFile(new File("/home/pi/Teleonome/HippocampusStatus.json"), hippocampusStatusDene.toString(4));
 					logger.debug("about to broadcasthealth");
 					broadcastHealth();
 				} catch (IOException e) {
