@@ -468,12 +468,13 @@ public class Hippocampus {
 					j.put("timeString", timeString);
 					j.put("Value", entry.getValue());
 					data.put(j);
+					logger.debug("line 471, j=" +j.toString() );
 				}
 				response.put("Identity", id);
 				response.put("Data", data);
 			}
 			client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(response.toString().getBytes()));
-
+			logger.debug("response sent" );
 		} catch (Exception e) {
 			logger.warn(Utils.getStringException(e));
 		}
