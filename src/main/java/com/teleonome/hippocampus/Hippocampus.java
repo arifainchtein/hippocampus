@@ -449,7 +449,7 @@ public class Hippocampus {
 			String deneWordName = identity.deneWordName;
 			
 			int range = req.getInt("Range");
-			logger.debug("line 453, Range=" +Range );
+			logger.debug("line 453, Range=" +range );
 			
 			ZoneId melbourneZone = ZoneId.of("Australia/Melbourne");
 			DateTimeFormatter pgFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
