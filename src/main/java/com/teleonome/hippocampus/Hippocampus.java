@@ -151,7 +151,7 @@ public class Hippocampus {
 					for(int j=0;j<storageDataDeneWords.length();j++) {
 						storeDataDeneWordName  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
 						storeDataDeneWordType  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_VALUETYPE_ATTRIBUTE);
-						if(!storeDataDeneWordType.equals("String")) {
+						if(!storeDataDeneWordType.equals("String") && !storeDataDeneWordType.equals("long") ) {
 							storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
 							logger.debug("line 152 storeDataDeneWordKey=" + storeDataDeneWordKey);
 							dataItemDatabaseData= aDBManager.getTelepathonDeneWordStart(  telepathonName,  deneName,  storeDataDeneWordName,   startTimeSeconds,   endTimeSeconds);
@@ -252,7 +252,7 @@ public class Hippocampus {
 			long dataValueSecondsTime;
 			Identity dataValueDeneChainIdentity;
 			JSONObject dataValueDeneChain;
-
+			String storeDataDeneWordType;
 			for(int i=0;i<dataDeneWords.length();i++) {
 				//
 				// valueDenePointer contains something like "@ChinampaMonitor:Telepathons:Chinampa:Purpose"
@@ -272,27 +272,32 @@ public class Hippocampus {
 					storageDataDeneWords = storageDataDene.getJSONArray("DeneWords");
 					for(int j=0;j<storageDataDeneWords.length();j++) {
 						storeDataDeneWordName  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
-						storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
-						logger.debug("line 269 storeDataDeneWordKey=" + storeDataDeneWordKey);
+						
+						storeDataDeneWordType  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_VALUETYPE_ATTRIBUTE);
+						if(!storeDataDeneWordType.equals("String") && !storeDataDeneWordType.equals("long") ) {
+							storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
+							logger.debug("line 269 storeDataDeneWordKey=" + storeDataDeneWordKey);
 
-						checkMemoryHealth();
-						TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, k -> {
-							return new TreeMap<Long, Object>();
-						});
-						identity = new Identity(storeDataDeneWordKey);
-						storageDeneWordValue =    DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
-						logger.debug("line 277 storageDeneWordValue=" + storageDeneWordValue);
-						// 2. Add new point and increment counter
-						if(storageDeneWordValue!=null) {
-							history.put(dataValueSecondsTime, storageDeneWordValue);
-							totalPoints.incrementAndGet();
-							// 3. Normal Time-based Pruning (24h)
-							long dayAgo = dataValueSecondsTime - 86400L;
-							// Count how many we are about to remove for the global counter
-							int removedCount = history.headMap(dayAgo).size();
-							history.headMap(dayAgo).clear();
-							totalPoints.addAndGet(-removedCount);
+							checkMemoryHealth();
+							TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, k -> {
+								return new TreeMap<Long, Object>();
+							});
+							identity = new Identity(storeDataDeneWordKey);
+							storageDeneWordValue =    DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+							logger.debug("line 277 storageDeneWordValue=" + storageDeneWordValue);
+							// 2. Add new point and increment counter
+							if(storageDeneWordValue!=null) {
+								history.put(dataValueSecondsTime, storageDeneWordValue);
+								totalPoints.incrementAndGet();
+								// 3. Normal Time-based Pruning (24h)
+								long dayAgo = dataValueSecondsTime - 86400L;
+								// Count how many we are about to remove for the global counter
+								int removedCount = history.headMap(dayAgo).size();
+								history.headMap(dayAgo).clear();
+								totalPoints.addAndGet(-removedCount);
+							}
 						}
+						
 
 					}
 				}else {
