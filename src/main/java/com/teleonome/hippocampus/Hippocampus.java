@@ -206,6 +206,14 @@ public class Hippocampus {
 		int duration = (int) ((System.currentTimeMillis()-startProcessTime)/1000);
 		loadDataDuration = Utils.getElapsedSecondsToHoursMinutesSecondsString(duration);
 		logger.debug("Finished loading data, it took " + loadDataDuration);
+		JSONObject hippocampusStatusDene= generateHippocampusStatusDene();
+		try {
+			logger.debug("about to save status file");
+			FileUtils.writeStringToFile(new File("/home/pi/Teleonome/HippocampusStatus.json"), hippocampusStatusDene.toString(4));
+		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			logger.warn(Utils.getStringException(e));
+		}
 	}
 	public void start() throws MqttException {
 		client = new MqttClient(broker, "Hippocampus_Organ", new MemoryPersistence());
