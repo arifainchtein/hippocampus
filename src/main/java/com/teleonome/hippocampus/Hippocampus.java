@@ -52,7 +52,10 @@ public class Hippocampus {
 	private JSONObject denomeJSONObject;
 	private PostgresqlPersistenceManager aDBManager;
 	private String teleonomeName;
-
+	String loadDataDuration="";
+	int preLoadHours=24;
+	boolean preLoadData=true;
+	
 	public Hippocampus() {
 		String fileName =  "/home/pi/Teleonome/lib/Log4J.properties";
 		System.out.println("reading log4j file at " + fileName);
@@ -84,14 +87,24 @@ public class Hippocampus {
 			logger.info("line 82 checking the Teleonome.denome first, length=" + denomeFileInString.length() );
 			denomeJSONObject = new JSONObject(denomeFileInString);
 			validJSONFormat=true;
-
-			int timeRangeHours=48;
+			preLoadHours=24;
+			 
+			identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_CONFIGURATION, TeleonomeConstants.DENE_HIPPOCAMPUS_GLOBAL_LIMITS);
+			globalLimit =  (Integer) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+			identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_CONFIGURATION, TeleonomeConstants.DENE_HIPPOCAMPUS_WARNING_THRESHOLD);
+			warningThreshold =  (Integer) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+			
+			identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_CONFIGURATION, TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_HOURS);
+			preLoadHours =  (Integer) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+			identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_CONFIGURATION, TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_DATA);
+			preLoadData =  (Boolean) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+				
 			//
 			// get the data
 			//
 			ZoneId zone = ZoneId.of("Australia/Melbourne");
 			ZonedDateTime now = ZonedDateTime.now(zone);
-			ZonedDateTime overallStart = now.minusHours(timeRangeHours);
+			ZonedDateTime overallStart = now.minusHours(preLoadHours);
 
 			// Use the exact calculated start as our initial cursor
 			ZonedDateTime cursor = overallStart;
@@ -191,7 +204,8 @@ public class Hippocampus {
 		}finally{
 		}
 		int duration = (int) ((System.currentTimeMillis()-startProcessTime)/1000);
-		logger.debug("Finished loading data, it took " + Utils.getElapsedSecondsToHoursMinutesSecondsString(duration));
+		loadDataDuration = Utils.getElapsedSecondsToHoursMinutesSecondsString(duration);
+		logger.debug("Finished loading data, it took " + loadDataDuration);
 	}
 	public void start() throws MqttException {
 		client = new MqttClient(broker, "Hippocampus_Organ", new MemoryPersistence());
@@ -334,7 +348,17 @@ public class Hippocampus {
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("Status", percentUsed > 100*(warningThreshold/globalLimit) ? "Critical" : "Ok" ,null,"String",true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-
+			
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_DATA, preLoadData ,null,"boolean",true);
+			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_HOURS, preLoadHours ,null,"int",true);
+			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
+			
+			if(preLoadData) {
+				hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("Load Process Duration", loadDataDuration ,null,"String",true);
+				hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
+			}
+			
 		} catch (Exception e) {
 			System.err.println("Could not broadcast health: " + e.getMessage());
 		}
