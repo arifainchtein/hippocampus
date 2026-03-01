@@ -483,7 +483,7 @@ public class Hippocampus {
 				response.put("deneWordName", deneWordName);
 				response.put("RequestId", requestId);
 			}
-			String destination =TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE+ requestId;
+			String destination =TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE+"/" + requestId;
 			client.publish(destination, new MqttMessage(response.toString().getBytes()));
 		//	client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(data.toString().getBytes()));
 			logger.debug("response sent" );
