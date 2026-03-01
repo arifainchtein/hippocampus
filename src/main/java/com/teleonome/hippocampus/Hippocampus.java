@@ -448,7 +448,7 @@ public class Hippocampus {
 			ZonedDateTime zdt;
 			TreeMap history = (TreeMap) shortTermMemory.get(id);
 			if (history != null && !history.isEmpty()) {
-				long now = System.currentTimeMillis();
+				long now = System.currentTimeMillis()/1000;
 				long startTs = range.equals("lastHour") ? (now - 3600L) : (now - 86400L);
 				logger.debug("line 453, startTs=" +startTs );
 				NavigableMap slice = history.tailMap(startTs, true);
