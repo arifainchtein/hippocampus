@@ -53,7 +53,7 @@ public class Hippocampus {
 	private PostgresqlPersistenceManager aDBManager;
 	private String teleonomeName;
 	String loadDataDuration="";
-	int preLoadHours=24;
+	int preLoadHours=48;
 	boolean preLoadData=true;
 	
 	public Hippocampus() {
