@@ -437,8 +437,9 @@ public class Hippocampus {
 	}
 	private void processRequest(String requestJson) {
 		try {
+			JSONObject response = new JSONObject();
 			JSONObject req = new JSONObject(requestJson);
-			logger.debug("line 275, request received=" +req.toString() );
+			logger.debug("line 441, request received=" +req.toString() );
 			String id = req.getString("Identity");
 			String range = req.optString("Range", "24h");
 			ZoneId melbourneZone = ZoneId.of("Australia/Melbourne");
@@ -449,15 +450,14 @@ public class Hippocampus {
 			if (history != null && !history.isEmpty()) {
 				long now = System.currentTimeMillis();
 				long startTs = range.equals("lastHour") ? (now - 3600L) : (now - 86400L);
-				logger.debug("line 283, startTs=" +startTs );
+				logger.debug("line 453, startTs=" +startTs );
 				NavigableMap slice = history.tailMap(startTs, true);
 				JSONArray data = new JSONArray();
-				logger.debug("line 283, slice=" +slice.size() );
+				logger.debug("line 455, slice=" +slice.size() );
 				JSONObject j;
 				long timeSeconds;
 				String timeString;
 				for (Object entryObj : slice.entrySet()) {
-
 					Map.Entry entry = (Map.Entry) entryObj;
 					timeSeconds = (long) entry.getKey();
 					zdt = Instant.ofEpochMilli(timeSeconds).atZone(melbourneZone);
@@ -469,13 +469,11 @@ public class Hippocampus {
 					j.put("Value", entry.getValue());
 					data.put(j);
 				}
-
-				JSONObject response = new JSONObject();
 				response.put("Identity", id);
 				response.put("Data", data);
-
-				client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(response.toString().getBytes()));
 			}
+			client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(response.toString().getBytes()));
+
 		} catch (Exception e) {
 			logger.warn(Utils.getStringException(e));
 		}
