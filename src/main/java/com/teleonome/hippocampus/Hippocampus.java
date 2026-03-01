@@ -87,7 +87,7 @@ public class Hippocampus {
 			logger.info("line 82 checking the Teleonome.denome first, length=" + denomeFileInString.length() );
 			denomeJSONObject = new JSONObject(denomeFileInString);
 			validJSONFormat=true;
-			preLoadHours=24;
+			preLoadHours=48;
 			 
 			identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_CONFIGURATION, TeleonomeConstants.DENE_HIPPOCAMPUS_GLOBAL_LIMITS);
 			globalLimit =  (Integer) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
