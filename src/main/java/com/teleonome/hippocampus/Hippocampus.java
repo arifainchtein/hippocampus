@@ -443,6 +443,10 @@ public class Hippocampus {
 			JSONObject req = new JSONObject(requestJson);
 			logger.debug("line 441, request received=" +req.toString() );
 			String id = req.getString("Identity");
+			Identity identity = new Identity(id);
+			String telepathonName=identity.deneChainName;
+			String deneWordName = identity.deneWordName;
+			
 			String range = req.optString("Range", "24h");
 			ZoneId melbourneZone = ZoneId.of("Australia/Melbourne");
 			DateTimeFormatter pgFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ssX")
@@ -474,9 +478,11 @@ public class Hippocampus {
 				}
 				response.put("Identity", id);
 				response.put("Data", data);
+				response.put("telepathonName", telepathonName);
+				response.put("deneWordName", deneWordName);
 			}
-	//		client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(response.toString().getBytes()));
-			client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(data.toString().getBytes()));
+			client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(response.toString().getBytes()));
+		//	client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(data.toString().getBytes()));
 			logger.debug("response sent" );
 		} catch (Exception e) {
 			logger.warn(Utils.getStringException(e));
