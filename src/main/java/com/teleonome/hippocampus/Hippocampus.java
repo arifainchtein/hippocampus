@@ -3,6 +3,7 @@ package com.teleonome.hippocampus;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.nio.charset.Charset;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -55,12 +56,17 @@ public class Hippocampus {
 	String loadDataDuration="";
 	int preLoadHours=48;
 	boolean preLoadData=true;
-	
+	String processName ;
+	int hippocampusPid;
 	public Hippocampus() {
 		String fileName =  "/home/pi/Teleonome/lib/Log4J.properties";
 		System.out.println("reading log4j file at " + fileName);
 		PropertyConfigurator.configure(fileName);
 		logger = Logger.getLogger(getClass());
+		
+		 processName = ManagementFactory.getRuntimeMXBean().getName();
+		 hippocampusPid = Integer.parseInt(processName.split("@")[0]);
+		logger.warn("line 69, hippocampusPid=" + hippocampusPid);
 		this.shortTermMemory = new ConcurrentHashMap();
 		aDBManager = PostgresqlPersistenceManager.instance();
 		PingThread aPingThread = new PingThread();
@@ -345,6 +351,7 @@ public class Hippocampus {
 			String formatedCurrentTime = currentTime.format(formatter);
 			hippocampusStatusDene.put(TeleonomeConstants.DATATYPE_TIMESTAMP, formatedCurrentTime);
 			hippocampusStatusDene.put(TeleonomeConstants.DATATYPE_TIMESTAMP_MILLISECONDS, System.currentTimeMillis());
+			hippocampusStatusDene.put("hippocampusPid",hippocampusPid);
 			hippocampusStatusDene.put("Last Message Time", messageArrivedMillis);
 			hippocampusStatusDene.put("DeneWords", hippocampusDeneWords);
 			JSONObject hippocampusStatusDeneDeneWord;
