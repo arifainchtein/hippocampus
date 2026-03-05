@@ -463,6 +463,7 @@ public class Hippocampus {
 					.withZone(melbourneZone);
 			ZonedDateTime zdt;
 			TreeMap history = (TreeMap) shortTermMemory.get(id);
+			logger.debug("line 4565,getting id=" +id +" treemap="+ history.size() );
 			if (history != null && !history.isEmpty()) {
 				long now = System.currentTimeMillis()/1000;
 				long startTs = (now - range*3600L);
