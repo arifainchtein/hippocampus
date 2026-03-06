@@ -356,9 +356,18 @@ public class Hippocampus {
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 			
 		
+			long currentPoints = totalPoints.get();
+	        // Calculate recommendation: Current points + what we had to throw away
+	        long recommendedLimit = currentPoints + totalSacrificed;
+	        
+	        // Memory calculation: (Recommended Points * 128 bytes per point) / 1024 / 1024 
+	        // We add a 50% buffer for the JVM stack, internal objects, and JSON strings.
+	        int recommendedMX = (int) (((recommendedLimit * 128) / 1048576) * 1.5);
+	        // Ensure a minimum floor of 128MB
+	        if(recommendedMX < 128) recommendedMX = 128;
 
 			// Existing status words (Total Points, Duration, etc.)
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_TOTAL_POINTS, totalPoints.get() ,null,"int",true);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_TOTAL_POINTS,currentPoints ,null,"int",true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 			
 			
@@ -368,6 +377,13 @@ public class Hippocampus {
 			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_PRE_LOAD_DURATION, loadDataDuration ,null,"int",true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 		
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_RECOMMENDED_XMX, recommendedLimit ,null,"int",true);
+			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
+			
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_RECOMMENDED_PRELOAD__RECOMMENDED_LIMIT, recommendedLimit ,null,"int",true);
+			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
+			
+	        
 	    	
 			if(preLoadData) {
 				hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("Load Process Duration", loadDataDuration ,null,"String",true);
