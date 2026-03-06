@@ -475,15 +475,18 @@ public class Hippocampus {
 	        Identity identity = new Identity(id);
 	        
 	        int rangeHours = req.getInt("Range");
-	        logger.debug("line 453, id=" + id + " Range Hours=" + rangeHours);
-	        
+	        logger.debug("line 453, id=" + id );
+	        logger.debug("line 454,  Range Hours=" + rangeHours);
 	        ZoneId melbourneZone = ZoneId.of("Australia/Melbourne");
 	        // Using ISO-like format for Postgres consistency
 	        DateTimeFormatter pgFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 	                .withZone(melbourneZone);
 	        Iterator it = shortTermMemory.keySet().iterator();
+	        String s;
 	        while(it.hasNext()) {
-	        	logger.debug("line 486, key=" + it.next());
+	        	s = (String) it.next();
+	        	
+	        	logger.debug("line 486, key=" +s + " size=" + shortTermMemory.get(s).size());
 	        }
 	        // Retrieve the history for this identity
 	        TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.get(id);
