@@ -377,7 +377,7 @@ public class Hippocampus {
 			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_PRE_LOAD_DURATION, loadDataDuration ,null,"int",true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 		
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_RECOMMENDED_XMX, recommendedLimit ,null,"int",true);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_RECOMMENDED_XMX, recommendedMX ,null,"int",true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 			
 			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_RECOMMENDED_PRELOAD__RECOMMENDED_LIMIT, recommendedLimit ,null,"int",true);
