@@ -470,12 +470,12 @@ public class Hippocampus {
 	        JSONObject req = new JSONObject(requestJson);
 	        logger.debug("line 441, request received=" + req.toString());
 	        
-	        String id = req.getString("Identity");
+	        String id = req.getString("Identity").trim();
 	        String requestId = req.optString("RequestId", "default");
 	        Identity identity = new Identity(id);
 	        
 	        int rangeHours = req.getInt("Range");
-	        logger.debug("line 453, Range Hours=" + rangeHours);
+	        logger.debug("line 453, id=" + id + " Range Hours=" + rangeHours);
 	        
 	        ZoneId melbourneZone = ZoneId.of("Australia/Melbourne");
 	        // Using ISO-like format for Postgres consistency
