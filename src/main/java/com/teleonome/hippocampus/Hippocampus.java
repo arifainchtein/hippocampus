@@ -44,9 +44,9 @@ public class Hippocampus {
 	private MqttClient client;
 	private final String broker = "tcp://localhost:1883"; 
 	//Total data points allowed across the whole Organ
-	private  int globalLimit = 50000; 
+	private  int globalLimit = 300000; 
 	//Threshold to start warning (90% of limit)
-	private int warningThreshold = 45000; 
+	private int warningThreshold = 270000; 
 	//Atomic counter to track total points in RAM
 	private final java.util.concurrent.atomic.AtomicInteger totalPoints = new java.util.concurrent.atomic.AtomicInteger(0);
 	Logger logger;
