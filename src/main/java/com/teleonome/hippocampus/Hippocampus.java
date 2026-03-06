@@ -481,7 +481,10 @@ public class Hippocampus {
 	        // Using ISO-like format for Postgres consistency
 	        DateTimeFormatter pgFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 	                .withZone(melbourneZone);
-
+	        Iterator it = shortTermMemory.keySet().iterator();
+	        while(it.hasNext()) {
+	        	logger.debug("line 486, key=" + it.next());
+	        }
 	        // Retrieve the history for this identity
 	        TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.get(id);
 
