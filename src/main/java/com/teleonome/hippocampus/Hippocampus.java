@@ -117,39 +117,41 @@ public class Hippocampus {
 	        ZoneId zone = ZoneId.of("Australia/Melbourne");
 	        ZonedDateTime now = ZonedDateTime.now(zone);
 	        ZonedDateTime cursor = now.minusHours(preLoadHours);
-
+	        logger
 	        while (cursor.isBefore(now)) {
 	            ZonedDateTime endOfThisDay = cursor.toLocalDate().atTime(23, 59, 59).atZone(zone);
 	            long startTimeSeconds = cursor.toEpochSecond();
 	            long endTimeSeconds = now.isBefore(endOfThisDay) ? now.toEpochSecond() : endOfThisDay.toEpochSecond();
 
-	            logger.debug("Processing: " + cursor.toLocalDate() + " | Start: " + startTimeSeconds + " | End: " + endTimeSeconds);
+	            logger.debug("line 126 Processing: " + cursor.toLocalDate() + " | Start: " + startTimeSeconds + " | End: " + endTimeSeconds);
 
 	            identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_DATA_DENE);
 	            JSONObject dataDene = DenomeUtils.getDeneByIdentity(denomeJSONObject, identity);
 	            JSONArray dataDeneWords = dataDene.getJSONArray("DeneWords");
-	            
+	            logger.debug("line 131,identity=" + identity.toString() );
 	            for(int i=0; i<dataDeneWords.length(); i++) {
 	                String valueDenePointer = dataDeneWords.getJSONObject(i).getString(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
 	                Identity valueDenePointerIdentity = new Identity(valueDenePointer);
 	                
 	                JSONObject storageDataDene = (JSONObject) DenomeUtils.getDeneByIdentity(denomeJSONObject, valueDenePointerIdentity);
 	                JSONArray storageDataDeneWords = storageDataDene.getJSONArray("DeneWords");
-	                
+	                logger.debug("line 138,valueDenePointerIdentity=" + valueDenePointerIdentity.toString() );
 	                for(int j=0; j<storageDataDeneWords.length(); j++) {
 	                    JSONObject wordObj = storageDataDeneWords.getJSONObject(j);
 	                    String storeDataDeneWordName = wordObj.getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
 	                    String storeDataDeneWordType = wordObj.getString(TeleonomeConstants.DENEWORD_VALUETYPE_ATTRIBUTE);
-	                    
+	                    logger.debug("line 143,storeDataDeneWordType=" + storeDataDeneWordType );
 	                    if(!storeDataDeneWordType.equals("String") && !storeDataDeneWordType.equals("long") ) {
 	                        String storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
-	                        
+	                        logger.debug("line 146,storeDataDeneWordKey=" + storeDataDeneWordKey );
+
 	                        JSONArray dataItemDatabaseData = aDBManager.getTelepathonDeneWordStart(valueDenePointerIdentity.deneChainName, valueDenePointerIdentity.deneName, storeDataDeneWordName, startTimeSeconds, endTimeSeconds);
 
 	                        for(int k=0; k<dataItemDatabaseData.length(); k++) {
 	                            JSONObject point = dataItemDatabaseData.getJSONObject(k);
 	                            long dataValueSecondsTime = point.getLong("timeSeconds");
 	                            Object storageDeneWordValue = point.get("Value");
+	                            logger.debug("line 154,storageDeneWordValue=" + storageDeneWordValue );
 
 	                            if(storageDeneWordValue != null) {
 	                                // 1. Check for Memory Limit Violation (Emergency Pruning)
@@ -158,6 +160,8 @@ public class Hippocampus {
 	                                }
 
 	                                TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, l -> new TreeMap<>());
+	                                logger.debug("line 163,dataValueSecondsTime=" + dataValueSecondsTime );
+	                                logger.debug("line 164,storageDeneWordValue=" + storageDeneWordValue );
 	                                
 	                                history.put(dataValueSecondsTime, storageDeneWordValue);
 	                                totalPoints.incrementAndGet();
