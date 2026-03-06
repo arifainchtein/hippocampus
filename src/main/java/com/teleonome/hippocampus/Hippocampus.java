@@ -489,26 +489,26 @@ public class Hippocampus {
 	            logger.debug("line 465, history found. Points in memory: " + history.size());
 
 	            // 1. Standardize to Milliseconds
-	            long nowMillis = System.currentTimeMillis();
-	            long rangeInMillis = rangeHours * 3600L * 1000L;
-	            long startTsMillis = nowMillis - rangeInMillis;
+	            long nowSeconds = System.currentTimeMillis()/1000;
+	            long rangeInSeconds = rangeHours * 3600L;
+	            long startTsSeconds = nowSeconds - rangeInSeconds;
 
-	            logger.debug("Querying from startTs (ms): " + startTsMillis);
+	            logger.debug("Querying from startTs (sec): " + startTsSeconds);
 
 	            // 2. Get the slice (TailMap)
-	            NavigableMap<Long, Object> slice = history.tailMap(startTsMillis, true);
+	            NavigableMap<Long, Object> slice = history.tailMap(startTsSeconds, true);
 	            logger.debug("line 465, slice size after time filter=" + slice.size());
 
 	            for (Map.Entry<Long, Object> entry : slice.entrySet()) {
-	                long timeMillis = entry.getKey();
+	                long timeSeconds = entry.getKey();
 	                
 	                // 3. Conversion using Millis
-	                ZonedDateTime zdt = Instant.ofEpochMilli(timeMillis).atZone(melbourneZone);
+	                ZonedDateTime zdt = Instant.ofEpochSecond(timeSeconds).atZone(melbourneZone);
 	                String timeString = zdt.format(pgFormatter);
 
 	                JSONObject j = new JSONObject();
 	                // Send back seconds to the browser if that's what the UI expects
-	                j.put("timeSeconds", timeMillis / 1000); 
+	                j.put("timeSeconds", timeSeconds / 1000); 
 	                j.put("timeString", timeString);
 	                j.put("Value", entry.getValue());
 	                data.put(j);
