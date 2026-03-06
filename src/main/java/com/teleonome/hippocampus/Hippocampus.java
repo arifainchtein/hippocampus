@@ -445,66 +445,78 @@ public class Hippocampus {
 		}
 	}
 	private void processRequest(String requestJson) {
-		JSONArray data = new JSONArray();
-		try {
-			JSONObject response = new JSONObject();
-			JSONObject req = new JSONObject(requestJson);
-			logger.debug("line 441, request received=" +req.toString() );
-			String id = req.getString("Identity");
-			String requestId = req.optString("RequestId", "default");
-			Identity identity = new Identity(id);
-			String telepathonName=identity.deneChainName;
-			String deneWordName = identity.deneWordName;
-			
-			int range = req.getInt("Range");
-			logger.debug("line 453, Range=" +range );
-			
-			ZoneId melbourneZone = ZoneId.of("Australia/Melbourne");
-			DateTimeFormatter pgFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
-					.withZone(melbourneZone);
-			ZonedDateTime zdt;
-			TreeMap history = (TreeMap) shortTermMemory.get(id);
-			logger.debug("line 465,getting id=" +id +" treemap="+ history.size() );
-			Iterator it = shortTermMemory.keySet().iterator();
-			while(it.hasNext()) {
-				logger.debug("line 470, key="+it.next());
-			}
-			if (history != null && !history.isEmpty()) {
-				long now = System.currentTimeMillis()/1000;
-				long startTs = (now - range*3600L);
-				logger.debug("line 462, startTs=" +startTs );
-				NavigableMap slice = history.tailMap(startTs, true);
-			
-				logger.debug("line 465, slice=" +slice.size() );
-				JSONObject j;
-				long timeSeconds;
-				String timeString;
-				for (Object entryObj : slice.entrySet()) {
-					Map.Entry entry = (Map.Entry) entryObj;
-					timeSeconds = (long)entry.getKey();
-					zdt = Instant.ofEpochSecond(timeSeconds).atZone(melbourneZone);
-					timeString = zdt.format(pgFormatter);
+	    JSONArray data = new JSONArray();
+	    try {
+	        JSONObject response = new JSONObject();
+	        JSONObject req = new JSONObject(requestJson);
+	        logger.debug("line 441, request received=" + req.toString());
+	        
+	        String id = req.getString("Identity");
+	        String requestId = req.optString("RequestId", "default");
+	        Identity identity = new Identity(id);
+	        
+	        int rangeHours = req.getInt("Range");
+	        logger.debug("line 453, Range Hours=" + rangeHours);
+	        
+	        ZoneId melbourneZone = ZoneId.of("Australia/Melbourne");
+	        // Using ISO-like format for Postgres consistency
+	        DateTimeFormatter pgFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+	                .withZone(melbourneZone);
 
-					j = new JSONObject();
-					j.put("timeSeconds", timeSeconds);
-					j.put("timeString", timeString);
-					j.put("Value", entry.getValue());
-					data.put(j);
-					logger.debug("line 480, j=" +j.toString() );
-				}
-				response.put("Identity", id);
-				response.put("Data", data);
-				response.put("telepathonName", telepathonName);
-				response.put("deneWordName", deneWordName);
-				response.put("RequestId", requestId);
-			}
-			String destination =TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE+"/" + requestId;
-			client.publish(destination, new MqttMessage(response.toString().getBytes()));
-		//	client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE, new MqttMessage(data.toString().getBytes()));
-			logger.debug("response sent" );
-		} catch (Exception e) {
-			logger.warn(Utils.getStringException(e));
-		}
+	        // Retrieve the history for this identity
+	        TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.get(id);
+
+	        if (history != null && !history.isEmpty()) {
+	            logger.debug("line 465, history found. Points in memory: " + history.size());
+
+	            // 1. Standardize to Milliseconds
+	            long nowMillis = System.currentTimeMillis();
+	            long rangeInMillis = rangeHours * 3600L * 1000L;
+	            long startTsMillis = nowMillis - rangeInMillis;
+
+	            logger.debug("Querying from startTs (ms): " + startTsMillis);
+
+	            // 2. Get the slice (TailMap)
+	            NavigableMap<Long, Object> slice = history.tailMap(startTsMillis, true);
+	            logger.debug("line 465, slice size after time filter=" + slice.size());
+
+	            for (Map.Entry<Long, Object> entry : slice.entrySet()) {
+	                long timeMillis = entry.getKey();
+	                
+	                // 3. Conversion using Millis
+	                ZonedDateTime zdt = Instant.ofEpochMilli(timeMillis).atZone(melbourneZone);
+	                String timeString = zdt.format(pgFormatter);
+
+	                JSONObject j = new JSONObject();
+	                // Send back seconds to the browser if that's what the UI expects
+	                j.put("timeSeconds", timeMillis / 1000); 
+	                j.put("timeString", timeString);
+	                j.put("Value", entry.getValue());
+	                data.put(j);
+	            }
+
+	            response.put("Identity", id);
+	            response.put("Data", data);
+	            response.put("telepathonName", identity.deneChainName);
+	            response.put("deneWordName", identity.deneWordName);
+	            response.put("RequestId", requestId);
+	            
+	            String destination = TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE + "/" + requestId;
+	            client.publish(destination, new MqttMessage(response.toString().getBytes()));
+	            logger.debug("Response sent to: " + destination + " with " + data.length() + " points.");
+
+	        } else {
+	            logger.warn("Request failed: No data found in memory for Identity: " + id);
+	            // Optionally send an empty response so the browser doesn't hang
+	            response.put("Data", new JSONArray());
+	            response.put("RequestId", requestId);
+	            String destination = TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE + "/" + requestId;
+	            client.publish(destination, new MqttMessage(response.toString().getBytes()));
+	        }
+
+	    } catch (Exception e) {
+	        logger.warn("Error in processRequest: " + Utils.getStringException(e));
+	    }
 	}
 
 
