@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
@@ -463,7 +464,11 @@ public class Hippocampus {
 					.withZone(melbourneZone);
 			ZonedDateTime zdt;
 			TreeMap history = (TreeMap) shortTermMemory.get(id);
-			logger.debug("line 4565,getting id=" +id +" treemap="+ history.size() );
+			logger.debug("line 465,getting id=" +id +" treemap="+ history.size() );
+			Iterator it = shortTermMemory.keySet().iterator();
+			while(it.hasNext()) {
+				logger.debug("line 470, key="+it.next());
+			}
 			if (history != null && !history.isEmpty()) {
 				long now = System.currentTimeMillis()/1000;
 				long startTs = (now - range*3600L);
