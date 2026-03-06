@@ -160,8 +160,8 @@ public class Hippocampus {
 	                                }
 
 	                                TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, l -> new TreeMap<>());
-	                                logger.debug("line 163,dataValueSecondsTime=" + dataValueSecondsTime );
-	                                logger.debug("line 164,storageDeneWordValue=" + storageDeneWordValue );
+	                               // logger.debug("line 163,dataValueSecondsTime=" + dataValueSecondsTime );
+	                           //     logger.debug("line 164,storageDeneWordValue=" + storageDeneWordValue );
 	                                
 	                                history.put(dataValueSecondsTime, storageDeneWordValue);
 	                                totalPoints.incrementAndGet();
@@ -205,6 +205,16 @@ public class Hippocampus {
 	    
 	    try {
 	        FileUtils.writeStringToFile(new File("/home/pi/Teleonome/HippocampusStatus.json"), hippocampusStatusDene.toString(4));
+	        Iterator it = shortTermMemory.keySet().iterator();
+	        String s;
+	        StringBuffer s2  =new StringBuffer();
+	        while(it.hasNext()) {
+	        	s = (String) it.next();
+	        	s2.append( "key=" +s + " size=" + shortTermMemory.get(s).size() + System.lineSeparator());
+	        	logger.debug("line 486, key=" +s + " size=" + shortTermMemory.get(s).size());
+	        }
+	        FileUtils.writeStringToFile(new File("/home/pi/Teleonome/Preload.txt"), s2.toString());
+	        
 	    } catch (IOException e) {
 	        logger.warn(Utils.getStringException(e));
 	    }
