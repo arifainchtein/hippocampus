@@ -117,7 +117,7 @@ public class Hippocampus {
 	        ZoneId zone = ZoneId.of("Australia/Melbourne");
 	        ZonedDateTime now = ZonedDateTime.now(zone);
 	        ZonedDateTime cursor = now.minusHours(preLoadHours);
-	        logger
+	        
 	        while (cursor.isBefore(now)) {
 	            ZonedDateTime endOfThisDay = cursor.toLocalDate().atTime(23, 59, 59).atZone(zone);
 	            long startTimeSeconds = cursor.toEpochSecond();
