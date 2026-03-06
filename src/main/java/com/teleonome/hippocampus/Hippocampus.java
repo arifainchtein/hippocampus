@@ -289,7 +289,7 @@ public class Hippocampus {
 						storeDataDeneWordType  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_VALUETYPE_ATTRIBUTE);
 						if(!storeDataDeneWordType.equals("String") && !storeDataDeneWordType.equals("long") ) {
 							storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
-							logger.debug("line 269 storeDataDeneWordKey=" + storeDataDeneWordKey);
+							logger.debug("line 292 storeDataDeneWordKey=" + storeDataDeneWordKey);
 
 							checkMemoryHealth();
 							TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, k -> {
@@ -297,10 +297,10 @@ public class Hippocampus {
 							});
 							identity = new Identity(storeDataDeneWordKey);
 							storageDeneWordValue =    DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
-							logger.debug("line 277 storageDeneWordValue=" + storageDeneWordValue);
+							logger.debug("line 300 storageDeneWordValue=" + storageDeneWordValue);
 							// 2. Add new point and increment counter
 							if(storageDeneWordValue!=null) {
-								
+								logger.debug("line 303 dataValueSecondsTime=" + dataValueSecondsTime);
 								history.put(dataValueSecondsTime, storageDeneWordValue);
 								totalPoints.incrementAndGet();
 								// 3. Normal Time-based Pruning (24h)
