@@ -54,8 +54,8 @@ public class Hippocampus {
 	private JSONObject denomeJSONObject;
 	private PostgresqlPersistenceManager aDBManager;
 	private String teleonomeName;
-	
-	int preLoadHours=48;
+	;
+	int preLoadHours=168;
 	boolean preLoadData=true;
 	String processName ;
 	int hippocampusPid;
@@ -75,8 +75,7 @@ public class Hippocampus {
 		logger.warn("line 69, hippocampusPid=" + hippocampusPid);
 		this.shortTermMemory = new ConcurrentHashMap();
 		aDBManager = PostgresqlPersistenceManager.instance();
-		PingThread aPingThread = new PingThread();
-		aPingThread.start();
+		
 		
 	}
 
@@ -269,6 +268,9 @@ public class Hippocampus {
 		logger.info("Hippocampus Active.");
 		
 		loadData();
+		
+		PingThread aPingThread = new PingThread();
+		aPingThread.start();
 	}
 	private void absorbPulse(String pulseJson) {
 		try {
