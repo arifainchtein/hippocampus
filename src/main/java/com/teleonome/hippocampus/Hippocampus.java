@@ -213,6 +213,8 @@ public class Hippocampus {
 	    } catch (IOException e) {
 	        logger.warn(Utils.getStringException(e));
 	    }
+	    
+	    
 	}
 	
 	private void performPostLoadCleanup(long nowSeconds) {
@@ -269,6 +271,10 @@ public class Hippocampus {
 		
 		loadData();
 		
+		String destination = TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE;
+        client.publish(destination, new MqttMessage("Preload Complete".getBytes()));
+        logger.debug("Hippocampus Ready");
+        
 		PingThread aPingThread = new PingThread();
 		aPingThread.start();
 	}
