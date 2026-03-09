@@ -75,17 +75,17 @@ public class Hippocampus {
 		logger.warn("line 69, hippocampusPid=" + hippocampusPid);
 		this.shortTermMemory = new ConcurrentHashMap();
 		aDBManager = PostgresqlPersistenceManager.instance();
-		
+		try {
+			start();
+		} catch (MqttException e) {
+			// TODO Auto-generated catch block
+			logger.warn(Utils.getStringException(e));
+		}
 		
 	}
 
 	public static void main(String[] args) {
-		try {
-			Hippocampus organ = new Hippocampus();
-			organ.start();
-		} catch (MqttException e) {
-			e.printStackTrace();
-		}
+		Hippocampus organ = new Hippocampus();
 	}
 
 	private void loadData() {
