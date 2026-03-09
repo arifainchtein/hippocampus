@@ -246,7 +246,7 @@ public class Hippocampus {
 		client.setCallback(new MqttCallback() {
 			@Override
 			public void connectionLost(Throwable cause) {
-				System.out.println("Heart connection lost.");
+				logger.info("Heart connection lost.");
 			}
 			@Override
 			public void messageArrived(String topic, MqttMessage message) {
@@ -441,7 +441,7 @@ public class Hippocampus {
 			MqttMessage message = new MqttMessage(hippocampusStatusDene.toString().getBytes());
 			 message.setQos(TeleonomeConstants.HEART_QUALITY_OF_SERVICE);
 			 message.setRetained(false);
-			client.publish("Hippocampus_Status", message);
+			client.publish(TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_STATUS, message);
 
 		} catch (Exception e) {
 			System.err.println("Could not broadcast health: " + e.getMessage());
