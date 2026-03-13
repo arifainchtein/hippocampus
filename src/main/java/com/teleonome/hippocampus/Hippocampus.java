@@ -99,10 +99,24 @@ public class Hippocampus {
 	    int pointsAdded = 0;
 
 	    try {
-	        String denomeFileInString = FileUtils.readFileToString(denomeFile, Charset.defaultCharset());
+	        String denomeFileInString="";
 	        logger.info("line 82 checking the Teleonome.denome first, length=" + denomeFileInString.length());
-	        denomeJSONObject = new JSONObject(denomeFileInString);
-	        validJSONFormat = true;
+	        boolean keepGoing=true;
+	        do {
+	        	try {
+	        		denomeFileInString = FileUtils.readFileToString(denomeFile, Charset.defaultCharset());
+	        		validJSONFormat = true;
+	        		
+	        		  denomeJSONObject = new JSONObject(denomeFileInString);
+	        		  keepGoing=false;
+	        	}catch(Exception e ) {
+	        		logger.warn(Utils.getStringException(e));
+	        		Thread.sleep(5000);
+	        	}
+	        }while(keepGoing);
+	        
+	      
+	        
 	        
 	        // Load Configuration from Denome
 	        identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_CONFIGURATION, TeleonomeConstants.DENE_HIPPOCAMPUS_GLOBAL_LIMITS);
