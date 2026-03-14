@@ -56,7 +56,7 @@ public class Hippocampus {
 	private String teleonomeName;
 	;
 	int preLoadHours=168;
-	boolean preLoadData=true;
+	boolean preLoadDataComplete=false;
 	String processName ;
 	int hippocampusPid;
 	int totalSacrificedDuringPreload = 0;
@@ -284,7 +284,7 @@ public class Hippocampus {
 		logger.info("Hippocampus Active.");
 		
 		loadData();
-		
+		preLoadDataComplete=true;
 		String destination = TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE;
         client.publish(destination, new MqttMessage("Preload Complete".getBytes()));
         logger.debug("Hippocampus Ready");
@@ -403,7 +403,7 @@ public class Hippocampus {
 			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("Status", (percentUsed > (100*(warningThreshold/globalLimit))) ? "Critical" : "Ok" ,null,"String",true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 			
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_DATA, preLoadData ,null,"boolean",true);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_DATA, preLoadDataComplete ,null,"boolean",true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_HOURS, preLoadHours ,null,"int",true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
@@ -438,7 +438,7 @@ public class Hippocampus {
 			
 	        
 	    	
-			if(preLoadData) {
+			if(preLoadDataComplete) {
 				hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("Load Process Duration", loadDataDuration ,null,"String",true);
 				hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 			}
