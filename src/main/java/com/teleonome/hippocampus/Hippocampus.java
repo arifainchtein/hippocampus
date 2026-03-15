@@ -100,7 +100,7 @@ public class Hippocampus {
 
 	    try {
 	        String denomeFileInString=null;
-	        logger.info("line 82 checking the Teleonome.denome first, length=" + denomeFileInString.length());
+	     //   logger.info("line 82 checking the Teleonome.denome first, length=" + denomeFileInString.length());
 	        boolean keepGoing=true;
 	        do {
 	        	try {
