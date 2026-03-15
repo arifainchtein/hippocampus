@@ -99,7 +99,7 @@ public class Hippocampus {
 	    int pointsAdded = 0;
 
 	    try {
-	        String denomeFileInString="";
+	        String denomeFileInString=null;
 	        logger.info("line 82 checking the Teleonome.denome first, length=" + denomeFileInString.length());
 	        boolean keepGoing=true;
 	        do {
@@ -110,6 +110,7 @@ public class Hippocampus {
 	        		  denomeJSONObject = new JSONObject(denomeFileInString);
 	        		  keepGoing=false;
 	        	}catch(Exception e ) {
+	        		denomeFileInString = null;
 	        		logger.warn(Utils.getStringException(e));
 	        		Thread.sleep(5000);
 	        	}
