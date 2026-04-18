@@ -265,6 +265,7 @@ public class Hippocampus {
 			}
 			@Override
 			public void messageArrived(String topic, MqttMessage message) {
+				System.gc();
 				String payload = new String(message.getPayload());
 				logger.debug("Message Arrived, topic=" + topic);
 				messageArrivedMillis = System.currentTimeMillis();
@@ -295,6 +296,8 @@ public class Hippocampus {
 	}
 	private void absorbPulse(String pulseJson) {
 		try {
+			System.gc();
+
 			JSONObject denomeJSONObject = new JSONObject(pulseJson);
 			JSONObject denomeObject = denomeJSONObject.getJSONObject("Denome");
 			teleonomeName = denomeObject.getString("Name");
