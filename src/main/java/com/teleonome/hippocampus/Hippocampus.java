@@ -20,7 +20,7 @@ import org.apache.commons.io.FileUtils;
 import org.apache.log4j.Logger;
 import org.apache.log4j.PropertyConfigurator;
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
-import org.eclipse.paho.client.mqttv3.MqttCallback;
+import org.eclipse.paho.client.mqttv3.MqttCallbackExtended;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
 import org.eclipse.paho.client.mqttv3.MqttException;
@@ -258,10 +258,25 @@ public class Hippocampus {
 		options.setCleanSession(true);
 		options.setAutomaticReconnect(true);
 
-		client.setCallback(new MqttCallback() {
+		client.setCallback(new MqttCallbackExtended() {
+			@Override
+			public void connectComplete(boolean reconnect, String serverURI) {
+				if (reconnect) {
+					logger.warn("Reconnected to Heart broker, re-subscribing topics");
+				} else {
+					logger.info("Connected to Heart broker");
+				}
+				try {
+					client.subscribe("Status", 1);
+					client.subscribe("Hippocampus_Request", 1);
+					logger.info("Subscriptions restored");
+				} catch (MqttException e) {
+					logger.warn("Failed to re-subscribe after connect: " + Utils.getStringException(e));
+				}
+			}
 			@Override
 			public void connectionLost(Throwable cause) {
-				logger.info("Heart connection lost.");
+				logger.warn("Heart connection lost: " + cause.getMessage());
 			}
 			@Override
 			public void messageArrived(String topic, MqttMessage message) {
@@ -281,8 +296,7 @@ public class Hippocampus {
 		});
 
 		client.connect(options);
-		client.subscribe("Status", 1);
-		client.subscribe("Hippocampus_Request", 1);
+		// connectComplete callback handles initial subscriptions and all re-subscriptions after reconnect
 		logger.info("Hippocampus Active.");
 		
 		loadData();
