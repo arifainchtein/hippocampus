@@ -280,7 +280,6 @@ public class Hippocampus {
 			}
 			@Override
 			public void messageArrived(String topic, MqttMessage message) {
-				System.gc();
 				String payload = new String(message.getPayload());
 				logger.debug("Message Arrived, topic=" + topic);
 				messageArrivedMillis = System.currentTimeMillis();
