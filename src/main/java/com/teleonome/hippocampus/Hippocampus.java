@@ -255,8 +255,9 @@ public class Hippocampus {
 	public void start() throws MqttException {
 		client = new MqttClient(broker, "Hippocampus_Organ", new MemoryPersistence());
 		MqttConnectOptions options = new MqttConnectOptions();
-		options.setCleanSession(true);
+		options.setCleanSession(false);
 		options.setAutomaticReconnect(true);
+		options.setKeepAliveInterval(120);
 
 		client.setCallback(new MqttCallbackExtended() {
 			@Override
