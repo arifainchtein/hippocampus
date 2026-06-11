@@ -564,9 +564,9 @@ public class Hippocampus {
 	        String requestId = req.optString("RequestId", "default");
 	        Identity identity = new Identity(id);
 	        
-	        int rangeHours = req.getInt("Range");
+	        long rangeMs = req.getLong("Range");
 	        logger.debug("line 453, id=" + id );
-	        logger.debug("line 454,  Range Hours=" + rangeHours);
+	        logger.debug("line 454, Range Ms=" + rangeMs);
 	        ZoneId melbourneZone = ZoneId.of("Australia/Melbourne");
 	        // Using ISO-like format for Postgres consistency
 	        DateTimeFormatter pgFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
@@ -586,7 +586,7 @@ public class Hippocampus {
 
 	            // 1. Standardize to Milliseconds
 	            long nowSeconds = System.currentTimeMillis()/1000;
-	            long rangeInSeconds = rangeHours * 3600L;
+	            long rangeInSeconds = rangeMs / 1000L;
 	            long startTsSeconds = nowSeconds - rangeInSeconds;
 
 	            logger.debug("Querying from startTs (sec): " + startTsSeconds);
