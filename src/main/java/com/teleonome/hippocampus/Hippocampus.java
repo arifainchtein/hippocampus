@@ -2,6 +2,7 @@ package com.teleonome.hippocampus;
 
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.nio.charset.Charset;
@@ -13,6 +14,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.NavigableMap;
+import java.util.Properties;
 import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -56,14 +58,32 @@ public class Hippocampus {
 	private String teleonomeName;
 	;
 	int preLoadHours=168;
+	int memoryWindowDays=7;
 	boolean preLoadDataComplete=false;
 	String processName ;
 	int hippocampusPid;
 	int totalSacrificedDuringPreload = 0;
-	
-    private int totalSacrificed = 0; // Define it here
+
+    private int totalSacrificed = 0;
     private String loadDataDuration = "";
-    
+
+	private static final String PREFS_FILE = "/home/pi/Teleonome/lib/hippocampus.properties";
+
+	private void loadPreferences() {
+		Properties props = new Properties();
+		try (FileInputStream fis = new FileInputStream(PREFS_FILE)) {
+			props.load(fis);
+			memoryWindowDays = Integer.parseInt(props.getProperty("memory.window.days", "7").trim());
+			preLoadHours = memoryWindowDays * 24;
+			logger.warn("Hippocampus preferences loaded: memory.window.days=" + memoryWindowDays
+					+ " preLoadHours=" + preLoadHours);
+		} catch (Exception e) {
+			logger.warn("Could not load " + PREFS_FILE + ", using defaults (7 days): " + e.getMessage());
+			memoryWindowDays = 7;
+			preLoadHours = 168;
+		}
+	}
+
 	public Hippocampus() {
 		String fileName =  "/home/pi/Teleonome/lib/Log4J.properties";
 		System.out.println("reading log4j file at " + fileName);
@@ -73,6 +93,7 @@ public class Hippocampus {
 		 processName = ManagementFactory.getRuntimeMXBean().getName();
 		 hippocampusPid = Integer.parseInt(processName.split("@")[0]);
 		logger.warn("line 69, hippocampusPid=" + hippocampusPid);
+		loadPreferences();
 		this.shortTermMemory = new ConcurrentHashMap();
 		aDBManager = PostgresqlPersistenceManager.instance();
 		try {
@@ -233,15 +254,15 @@ public class Hippocampus {
 	}
 	
 	private void performPostLoadCleanup(long nowSeconds) {
-	    long twentyFourHoursAgo = nowSeconds - 86400L;
+	    long windowSeconds = 86400L * memoryWindowDays;
+	    long windowAgo = nowSeconds - windowSeconds;
 	    int totalPruned = 0;
 
 	    for (String key : shortTermMemory.keySet()) {
 	        TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.get(key);
 	        if (history != null) {
-	            // Find all points older than 24 hours
 	            int countBefore = history.size();
-	            history.headMap(twentyFourHoursAgo).clear();
+	            history.headMap(windowAgo).clear();
 	            int countAfter = history.size();
 	            
 	            int prunedFromThisSensor = countBefore - countAfter;
@@ -374,11 +395,9 @@ public class Hippocampus {
 								logger.debug("line 303 dataValueSecondsTime=" + dataValueSecondsTime);
 								history.put(dataValueSecondsTime, storageDeneWordValue);
 								totalPoints.incrementAndGet();
-								// 3. Normal Time-based Pruning (24h)
-								long dayAgo = dataValueSecondsTime - 86400L;
-								// Count how many we are about to remove for the global counter
-								int removedCount = history.headMap(dayAgo).size();
-								history.headMap(dayAgo).clear();
+								long windowCutoff = dataValueSecondsTime - (86400L * memoryWindowDays);
+								int removedCount = history.headMap(windowCutoff).size();
+								history.headMap(windowCutoff).clear();
 								totalPoints.addAndGet(-removedCount);
 							}
 						}
@@ -584,8 +603,7 @@ public class Hippocampus {
 	                String timeString = zdt.format(pgFormatter);
 
 	                JSONObject j = new JSONObject();
-	                // Send back seconds to the browser if that's what the UI expects
-	                j.put("timeSeconds", timeSeconds / 1000); 
+	                j.put("timeSeconds", timeSeconds);
 	                j.put("timeString", timeString);
 	                j.put("Value", entry.getValue());
 	                data.put(j);
