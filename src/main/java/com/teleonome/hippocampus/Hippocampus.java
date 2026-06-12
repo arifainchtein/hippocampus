@@ -472,14 +472,55 @@ public class Hippocampus {
 			
 			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_RECOMMENDED_PRELOAD__RECOMMENDED_LIMIT, recommendedLimit ,null,"int",true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-			
-	        
-	    	
+
+
+
 			if(preLoadDataComplete) {
 				hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("Load Process Duration", loadDataDuration ,null,"String",true);
 				hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 			}
-			
+
+			// Memory breakdown grouped by sensor (DeneChain), for pie chart rendering in the web app
+			try {
+				java.util.Map<String, Integer> chainCounts = new java.util.HashMap<>();
+				for (java.util.Map.Entry<String, TreeMap> memEntry : shortTermMemory.entrySet()) {
+					String memKey = memEntry.getKey();
+					int count = memEntry.getValue().size();
+					String groupName = memKey;
+					try {
+						Identity memId = new Identity(memKey);
+						if (memId.deneChainName != null && !memId.deneChainName.isEmpty()) {
+							groupName = memId.deneChainName;
+						}
+					} catch (Exception ignored) { /* use full key as group */ }
+					chainCounts.merge(groupName, count, Integer::sum);
+				}
+				java.util.List<java.util.Map.Entry<String, Integer>> sortedChains =
+					new java.util.ArrayList<>(chainCounts.entrySet());
+				sortedChains.sort((a, b) -> b.getValue() - a.getValue());
+				JSONArray memoryBreakdown = new JSONArray();
+				int otherPoints = 0;
+				for (int bi = 0; bi < sortedChains.size(); bi++) {
+					if (bi < 15) {
+						JSONObject bEntry = new JSONObject();
+						bEntry.put("name", sortedChains.get(bi).getKey());
+						bEntry.put("points", sortedChains.get(bi).getValue());
+						memoryBreakdown.put(bEntry);
+					} else {
+						otherPoints += sortedChains.get(bi).getValue();
+					}
+				}
+				if (otherPoints > 0) {
+					JSONObject otherEntry = new JSONObject();
+					otherEntry.put("name", "Other");
+					otherEntry.put("points", otherPoints);
+					memoryBreakdown.put(otherEntry);
+				}
+				hippocampusStatusDene.put("MemoryBreakdown", memoryBreakdown);
+			} catch (Exception bex) {
+				logger.warn("Failed to build memory breakdown: " + bex.getMessage());
+			}
+
 		} catch (Exception e) {
 			System.err.println("Could not broadcast health: " + e.getMessage());
 		}
