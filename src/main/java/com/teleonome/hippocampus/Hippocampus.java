@@ -417,7 +417,24 @@ public class Hippocampus {
 	private JSONObject generateHippocampusStatusDene() {
 		JSONObject hippocampusStatusDene = new JSONObject();
 		try {
-			int current = totalPoints.get();
+			// Compute accurate point count and breakdown in a single pass over shortTermMemory
+			// so that PointsUsed and the breakdown slices always sum to the same total.
+			java.util.Map<String, Integer> chainCounts = new java.util.HashMap<>();
+			int current = 0;
+			for (java.util.Map.Entry<String, TreeMap> memEntry : shortTermMemory.entrySet()) {
+				String memKey = memEntry.getKey();
+				int count = memEntry.getValue().size();
+				current += count;
+				String groupName = memKey;
+				try {
+					Identity memId = new Identity(memKey);
+					if (memId.deneChainName != null && !memId.deneChainName.isEmpty()) {
+						groupName = memId.deneChainName;
+					}
+				} catch (Exception ignored) {}
+				chainCounts.merge(groupName, count, Integer::sum);
+			}
+
 			double percentUsed = ((double) current / globalLimit) * 100;
 			int available = globalLimit - current;
 			hippocampusStatusDene.put("Name", TeleonomeConstants.DENE_HIPPOCAMPUS_MEMORY_STATUS_DENE);
@@ -427,101 +444,70 @@ public class Hippocampus {
 			String formatedCurrentTime = currentTime.format(formatter);
 			hippocampusStatusDene.put(TeleonomeConstants.DATATYPE_TIMESTAMP, formatedCurrentTime);
 			hippocampusStatusDene.put(TeleonomeConstants.DATATYPE_TIMESTAMP_MILLISECONDS, System.currentTimeMillis());
-			hippocampusStatusDene.put("hippocampusPid",hippocampusPid);
+			hippocampusStatusDene.put("hippocampusPid", hippocampusPid);
 			hippocampusStatusDene.put("Last Message Time", messageArrivedMillis);
 			hippocampusStatusDene.put("DeneWords", hippocampusDeneWords);
 			JSONObject hippocampusStatusDeneDeneWord;
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("PointsUsed", current ,null,"int",true);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("PointsUsed", current, null, "int", true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("PointsAvailable", available ,null,"int",true);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("PointsAvailable", available, null, "int", true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("PercentageUsed",  Math.round(percentUsed * 100.0) / 100.0 ,null,"double",true);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("PercentageUsed", Math.round(percentUsed * 100.0) / 100.0, null, "double", true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("Status", (percentUsed > (100*(warningThreshold/globalLimit))) ? "Critical" : "Ok" ,null,"String",true);
-			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-			
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_DATA, preLoadDataComplete ,null,"boolean",true);
-			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_HOURS, preLoadHours ,null,"int",true);
-			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-			
-		
-			long currentPoints = totalPoints.get();
-	        // Calculate recommendation: Current points + what we had to throw away
-	        long recommendedLimit = currentPoints + totalSacrificed;
-	        
-	        // Memory calculation: (Recommended Points * 128 bytes per point) / 1024 / 1024 
-	        // We add a 50% buffer for the JVM stack, internal objects, and JSON strings.
-	        int recommendedMX = (int) (((recommendedLimit * 128) / 1048576) * 1.5);
-	        // Ensure a minimum floor of 128MB
-	        if(recommendedMX < 128) recommendedMX = 128;
-
-			// Existing status words (Total Points, Duration, etc.)
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_TOTAL_POINTS,currentPoints ,null,"int",true);
-			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-			
-			
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_SACRIFIED_POINTS, totalSacrificed ,null,"int",true);
-			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-			
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_PRE_LOAD_DURATION, loadDataDuration ,null,"int",true);
-			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-		
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_RECOMMENDED_XMX, recommendedMX ,null,"int",true);
-			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-			
-			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_RECOMMENDED_PRELOAD__RECOMMENDED_LIMIT, recommendedLimit ,null,"int",true);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("Status", (percentUsed > (100.0 * warningThreshold / globalLimit)) ? "Critical" : "Ok", null, "String", true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_DATA, preLoadDataComplete, null, "boolean", true);
+			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_HOURS, preLoadHours, null, "int", true);
+			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 
+			long currentPoints = (long) current;
+			long recommendedLimit = currentPoints + totalSacrificed;
+			int recommendedMX = (int) (((recommendedLimit * 128) / 1048576) * 1.5);
+			if (recommendedMX < 128) recommendedMX = 128;
 
-			if(preLoadDataComplete) {
-				hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("Load Process Duration", loadDataDuration ,null,"String",true);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_TOTAL_POINTS, currentPoints, null, "int", true);
+			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_SACRIFIED_POINTS, totalSacrificed, null, "int", true);
+			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_PRE_LOAD_DURATION, loadDataDuration, null, "int", true);
+			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_RECOMMENDED_XMX, recommendedMX, null, "int", true);
+			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject(TeleonomeConstants.DENE_HIPPOCAMPUS_RECOMMENDED_PRELOAD__RECOMMENDED_LIMIT, recommendedLimit, null, "int", true);
+			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
+
+			if (preLoadDataComplete) {
+				hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("Load Process Duration", loadDataDuration, null, "String", true);
 				hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 			}
 
-			// Memory breakdown grouped by sensor (DeneChain), for pie chart rendering in the web app
-			try {
-				java.util.Map<String, Integer> chainCounts = new java.util.HashMap<>();
-				for (java.util.Map.Entry<String, TreeMap> memEntry : shortTermMemory.entrySet()) {
-					String memKey = memEntry.getKey();
-					int count = memEntry.getValue().size();
-					String groupName = memKey;
-					try {
-						Identity memId = new Identity(memKey);
-						if (memId.deneChainName != null && !memId.deneChainName.isEmpty()) {
-							groupName = memId.deneChainName;
-						}
-					} catch (Exception ignored) { /* use full key as group */ }
-					chainCounts.merge(groupName, count, Integer::sum);
+			// Build MemoryBreakdown from the chainCounts already computed above
+			java.util.List<java.util.Map.Entry<String, Integer>> sortedChains =
+				new java.util.ArrayList<>(chainCounts.entrySet());
+			sortedChains.sort((a, b) -> b.getValue() - a.getValue());
+			JSONArray memoryBreakdown = new JSONArray();
+			int otherPoints = 0;
+			for (int bi = 0; bi < sortedChains.size(); bi++) {
+				if (bi < 15) {
+					JSONObject bEntry = new JSONObject();
+					bEntry.put("name", sortedChains.get(bi).getKey());
+					bEntry.put("points", sortedChains.get(bi).getValue());
+					memoryBreakdown.put(bEntry);
+				} else {
+					otherPoints += sortedChains.get(bi).getValue();
 				}
-				java.util.List<java.util.Map.Entry<String, Integer>> sortedChains =
-					new java.util.ArrayList<>(chainCounts.entrySet());
-				sortedChains.sort((a, b) -> b.getValue() - a.getValue());
-				JSONArray memoryBreakdown = new JSONArray();
-				int otherPoints = 0;
-				for (int bi = 0; bi < sortedChains.size(); bi++) {
-					if (bi < 15) {
-						JSONObject bEntry = new JSONObject();
-						bEntry.put("name", sortedChains.get(bi).getKey());
-						bEntry.put("points", sortedChains.get(bi).getValue());
-						memoryBreakdown.put(bEntry);
-					} else {
-						otherPoints += sortedChains.get(bi).getValue();
-					}
-				}
-				if (otherPoints > 0) {
-					JSONObject otherEntry = new JSONObject();
-					otherEntry.put("name", "Other");
-					otherEntry.put("points", otherPoints);
-					memoryBreakdown.put(otherEntry);
-				}
-				// Stored as a JSON string DeneWord so it travels through the Denome and ExoZero network
-				hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("MemoryBreakdown", memoryBreakdown.toString(), null, "String", true);
-				hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
-			} catch (Exception bex) {
-				logger.warn("Failed to build memory breakdown: " + bex.getMessage());
 			}
+			if (otherPoints > 0) {
+				JSONObject otherEntry = new JSONObject();
+				otherEntry.put("name", "Other");
+				otherEntry.put("points", otherPoints);
+				memoryBreakdown.put(otherEntry);
+			}
+			// Stored as JSON string so it travels through the Denome and ExoZero network
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("MemoryBreakdown", memoryBreakdown.toString(), null, "String", true);
+			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 
 		} catch (Exception e) {
 			System.err.println("Could not broadcast health: " + e.getMessage());
