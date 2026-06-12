@@ -516,7 +516,9 @@ public class Hippocampus {
 					otherEntry.put("points", otherPoints);
 					memoryBreakdown.put(otherEntry);
 				}
-				hippocampusStatusDene.put("MemoryBreakdown", memoryBreakdown);
+				// Stored as a JSON string DeneWord so it travels through the Denome and ExoZero network
+				hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("MemoryBreakdown", memoryBreakdown.toString(), null, "String", true);
+				hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 			} catch (Exception bex) {
 				logger.warn("Failed to build memory breakdown: " + bex.getMessage());
 			}
