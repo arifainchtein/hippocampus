@@ -369,43 +369,55 @@ public class Hippocampus {
 				logger.debug("line 257 dataValueDeneChainIdentity=" + dataValueDeneChainIdentity.toString());
 				dataValueDeneChain =  (JSONObject) DenomeUtils.getDeneChainByIdentity(denomeJSONObject, dataValueDeneChainIdentity);
 
-				if(dataValueDeneChain!=null && dataValueDeneChain.has("Seconds Time")) {
-					logger.debug("line 261 dataValueDeneChain=" + dataValueDeneChain.toString());
-					dataValueSecondsTime = dataValueDeneChain.getLong("Seconds Time");
-					logger.debug("line 263 dataValueSecondsTime=" + dataValueSecondsTime);
-					storageDataDene=  (JSONObject) DenomeUtils.getDeneByIdentity(denomeJSONObject, valueDenePointerIdentity);
-					storageDataDeneWords = storageDataDene.getJSONArray("DeneWords");
-					for(int j=0;j<storageDataDeneWords.length();j++) {
-						storeDataDeneWordName  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
-						
-						storeDataDeneWordType  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_VALUETYPE_ATTRIBUTE);
-						if(!storeDataDeneWordType.equals("String") && !storeDataDeneWordType.equals("long") ) {
-							storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
-							logger.debug("line 292 storeDataDeneWordKey=" + storeDataDeneWordKey);
-
-							checkMemoryHealth();
-							TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, k -> {
-								return new TreeMap<Long, Object>();
-							});
-							identity = new Identity(storeDataDeneWordKey);
-							storageDeneWordValue =    DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
-							logger.debug("line 300 storageDeneWordValue=" + storageDeneWordValue);
-							// 2. Add new point and increment counter
-							if(storageDeneWordValue!=null) {
-								logger.debug("line 303 dataValueSecondsTime=" + dataValueSecondsTime);
-								history.put(dataValueSecondsTime, storageDeneWordValue);
-								totalPoints.incrementAndGet();
-								long windowCutoff = dataValueSecondsTime - (86400L * memoryWindowDays);
-								int removedCount = history.headMap(windowCutoff).size();
-								history.headMap(windowCutoff).clear();
-								totalPoints.addAndGet(-removedCount);
+				if(dataValueDeneChain!=null) {
+					storageDataDene = (JSONObject) DenomeUtils.getDeneByIdentity(denomeJSONObject, valueDenePointerIdentity);
+					if (storageDataDene != null) {
+						storageDataDeneWords = storageDataDene.getJSONArray("DeneWords");
+						// Seconds Time may be a top-level DeneChain attribute (older pulses)
+						// or a DeneWord of type "long" inside the Dene (current structure).
+						dataValueSecondsTime = System.currentTimeMillis() / 1000;
+						if (dataValueDeneChain.has("Seconds Time")) {
+							dataValueSecondsTime = dataValueDeneChain.getLong("Seconds Time");
+						} else {
+							for (int j = 0; j < storageDataDeneWords.length(); j++) {
+								JSONObject dw = storageDataDeneWords.getJSONObject(j);
+								if ("Seconds Time".equals(dw.getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE))) {
+									dataValueSecondsTime = ((Number) dw.get(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE)).longValue();
+									break;
+								}
 							}
 						}
-						
+						logger.debug("line 263 dataValueSecondsTime=" + dataValueSecondsTime);
+						for(int j=0;j<storageDataDeneWords.length();j++) {
+							storeDataDeneWordName  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
+							storeDataDeneWordType  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_VALUETYPE_ATTRIBUTE);
+							if(!storeDataDeneWordType.equals("String") && !storeDataDeneWordType.equals("long") ) {
+								storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
+								logger.debug("line 292 storeDataDeneWordKey=" + storeDataDeneWordKey);
 
+								checkMemoryHealth();
+								TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, k -> {
+									return new TreeMap<Long, Object>();
+								});
+								identity = new Identity(storeDataDeneWordKey);
+								storageDeneWordValue = DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+								logger.debug("line 300 storageDeneWordValue=" + storageDeneWordValue);
+								if(storageDeneWordValue!=null) {
+									logger.debug("line 303 dataValueSecondsTime=" + dataValueSecondsTime);
+									history.put(dataValueSecondsTime, storageDeneWordValue);
+									totalPoints.incrementAndGet();
+									long windowCutoff = dataValueSecondsTime - (86400L * memoryWindowDays);
+									int removedCount = history.headMap(windowCutoff).size();
+									history.headMap(windowCutoff).clear();
+									totalPoints.addAndGet(-removedCount);
+								}
+							}
+						}
+					} else {
+						logger.warn("Dene not found for identity: " + valueDenePointerIdentity);
 					}
-				}else {
-					logger.warn("The denechain with identity " + dataValueDeneChainIdentity + " does not have Seconds Time, dataValueDeneChain=" + dataValueDeneChain);
+				} else {
+					logger.warn("DeneChain not found for identity: " + dataValueDeneChainIdentity);
 				}
 
 			}
@@ -420,10 +432,13 @@ public class Hippocampus {
 			// Compute accurate point count and breakdown in a single pass over shortTermMemory
 			// so that PointsUsed and the breakdown slices always sum to the same total.
 			java.util.Map<String, Integer> chainCounts = new java.util.HashMap<>();
+			// Earliest/latest epoch seconds currently held per device (deneChainName), across all its DeneWords
+			java.util.Map<String, long[]> chainRanges = new java.util.HashMap<>();
 			int current = 0;
 			for (java.util.Map.Entry<String, TreeMap> memEntry : shortTermMemory.entrySet()) {
 				String memKey = memEntry.getKey();
-				int count = memEntry.getValue().size();
+				TreeMap<Long, Object> memHistory = memEntry.getValue();
+				int count = memHistory.size();
 				current += count;
 				String groupName = memKey;
 				try {
@@ -433,6 +448,12 @@ public class Hippocampus {
 					}
 				} catch (Exception ignored) {}
 				chainCounts.merge(groupName, count, Integer::sum);
+				if (!memHistory.isEmpty()) {
+					long firstSeconds = memHistory.firstKey();
+					long lastSeconds = memHistory.lastKey();
+					chainRanges.merge(groupName, new long[]{firstSeconds, lastSeconds},
+						(a, b) -> new long[]{Math.min(a[0], b[0]), Math.max(a[1], b[1])});
+				}
 			}
 
 			double percentUsed = ((double) current / globalLimit) * 100;
@@ -507,6 +528,25 @@ public class Hippocampus {
 			}
 			// Stored as JSON string so it travels through the Denome and ExoZero network
 			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("MemoryBreakdown", memoryBreakdown.toString(), null, "String", true);
+			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
+
+			// Earliest/latest data currently available per device, covering every device (unlike
+			// MemoryBreakdown's top-15 cap), so the webapp can show a date range per device tab.
+			ZoneId melbourneZoneForRanges = ZoneId.of("Australia/Melbourne");
+			DateTimeFormatter rangeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+					.withZone(melbourneZoneForRanges);
+			JSONArray deviceDateRanges = new JSONArray();
+			for (java.util.Map.Entry<String, long[]> rangeEntry : chainRanges.entrySet()) {
+				long startSeconds = rangeEntry.getValue()[0];
+				long endSeconds = rangeEntry.getValue()[1];
+				JSONObject rangeJSON = new JSONObject();
+				rangeJSON.put("name", rangeEntry.getKey());
+				rangeJSON.put("start", Instant.ofEpochSecond(startSeconds).atZone(melbourneZoneForRanges).format(rangeFormatter));
+				rangeJSON.put("end", Instant.ofEpochSecond(endSeconds).atZone(melbourneZoneForRanges).format(rangeFormatter));
+				deviceDateRanges.put(rangeJSON);
+			}
+			// Stored as JSON string so it travels through the Denome and ExoZero network
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("DeviceDateRanges", deviceDateRanges.toString(), null, "String", true);
 			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 
 		} catch (Exception e) {

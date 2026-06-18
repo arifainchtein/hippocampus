@@ -1,260 +1,202 @@
 # 🧠 Hippocampus — Short-Term Memory System
 
-A distributed MQTT-based short-term data memory system. Named after the brain structure
-responsible for short-term memory formation.
+An MQTT-based short-term data memory service for the **Teleonome** organism. Named after the
+brain structure responsible for short-term memory formation. Hippocampus is one "organ" in a
+larger Teleonome system, running as a standalone Java process on a Raspberry Pi.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                                                                     │
-│   Data Sources            Moquette Broker            Consumers      │
-│   ─────────────           ──────────────────         ──────────     │
-│                           Port 1883 (TCP)                           │
-│   Any publisher  ──────►  Port 8083 (WS)  ◄───────  Web App        │
-│   (sensors, apps)         │                          (jQuery/PAHO)  │
-│                           │                                         │
-│                           ▼                                         │
-│                    ┌──────────────┐                                 │
-│                    │ Hippocampus  │  The Memory                     │
-│                    │  (Java App)  │                                 │
-│                    │              │                                 │
-│                    │  TreeMap<    │                                 │
-│                    │   identity,  │                                 │
-│                    │   TreeMap<   │                                 │
-│                    │    epoch,    │                                 │
-│                    │    DataPoint │                                 │
-│                    │   >>         │                                 │
-│                    └──────────────┘                                 │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                                                                          │
+│   Teleonome Heart           External MQTT Broker          Hippocampus    │
+│   (other organs)            (e.g. Mosquitto)               (this app)    │
+│                              tcp://localhost:1883                        │
+│   Status (heartbeat) ───────────────────────────────►  absorbPulse()     │
+│   Hippocampus_Request ──────────────────────────────►  processRequest() │
+│                                                                          │
+│                          ◄────────── Hippocampus_Response                │
+│                          ◄────────── Hippocampus_Response/{requestId}    │
+│                          ◄────────── Hippocampus_Status (every 30s)      │
+│                                                                          │
+│                                      ┌──────────────────────┐            │
+│                                      │ shortTermMemory       │            │
+│                                      │ ConcurrentHashMap<     │            │
+│                                      │   identity,            │            │
+│                                      │   TreeMap<epochSecs,   │            │
+│                                      │     value>>            │            │
+│                                      └──────────────────────┘            │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
+
+Hippocampus does **not** embed its own MQTT broker — it connects as a client to an external
+broker (Mosquitto or similar) already running at `tcp://localhost:1883`. The `moquette-broker`
+Maven dependency is present but unused by the code.
 
 ---
 
-## Components
+## Core Data Structure
 
-### 1. `hippocampus/` — The Memory Service (Java)
-
-The core service. Subscribes to MQTT, stores data in a **two-level TreeMap**:
-
-```
-identity  →  TreeMap<epochTimestamp(ms), DataPoint>
+```java
+ConcurrentHashMap<String, TreeMap<Long, Object>> shortTermMemory
 ```
 
-This gives **O(log n) inserts and O(log n) range queries** on the timestamp axis.
+- **Key**: a Denome identity pointer + DeneWord name, e.g.
+  `@ChinampaMonitor:Telepathons:Chinampa:Purpose:SomeValue`
+- **Value**: `TreeMap<epochSeconds, value>` — ordered by time, giving O(log n) inserts and
+  O(log n) range queries on the timestamp axis (seconds resolution, not milliseconds).
 
-**Key Classes:**
-- `HippocampusApp`   — main entry point, wires everything together
-- `MemoryStore`      — the TreeMap memory (thread-safe, with eviction)
-- `MqttHandler`      — subscribes/publishes via Eclipse PAHO
-- `DataPoint`        — identity + epochTimestamp + value
-- `QueryRequest`     — query envelope (type, identity, fromEpoch, toEpoch)
+See `src/main/java/com/teleonome/hippocampus/Hippocampus.java` (single class, ~680 lines) for
+the full implementation.
 
-**MQTT Topics:**
+---
+
+## MQTT Topics
 
 | Direction | Topic | Purpose |
 |-----------|-------|---------|
-| Subscribe | `data/ingest` | Receive new DataPoints |
-| Subscribe | `hippocampus/query` | Receive query requests |
-| Publish   | `hippocampus/response/{corrId}` | Send query results |
-| Publish   | `hippocampus/status` | Periodic heartbeat + stats |
+| Subscribe | `Status` | Heartbeat pulses from the Teleonome heart — full Denome JSON, processed by `absorbPulse()` |
+| Subscribe | `Hippocampus_Request` | Query requests, processed by `processRequest()` |
+| Publish   | `Hippocampus_Response` | `"Preload Complete"` notice, sent once after startup preload finishes |
+| Publish   | `Hippocampus_Response/{requestId}` | Query results for a given request |
+| Publish   | `Hippocampus_Status` | Periodic memory health broadcast (every 30s, via `PingThread`) |
 
 ---
 
-### 2. `broker/` — Moquette MQTT Broker (Java)
+## Data Flow
 
-An embedded Moquette broker. Runs as a standalone JAR.
+### Ingest — `absorbPulse(payload)`
 
-- **TCP port 1883** — standard MQTT (for Hippocampus app, backend publishers)
-- **WebSocket port 8083** (`/mqtt`) — for browser-based PAHO client
+Triggered on every `Status` message. The payload is the full Denome JSON heartbeat. For each
+DeneWord pointer listed in the Hippocampus "Data" dene, it resolves the pointed-to value and
+its `Seconds Time`, then stores it in `shortTermMemory` keyed by `pointer:deneWordName`. After
+each insert it applies a rolling-window prune (drops anything older than `memoryWindowDays`
+for that identity) and calls `checkMemoryHealth()`.
 
-Configure via `src/main/resources/moquette.conf`.
+### Query — `processRequest(payload)`
 
----
-
-### 3. `webapp/` — Web Console (Tomcat + jQuery + PAHO)
-
-A WAR deployed to Tomcat. Pure HTML/JS — no server-side processing needed.
-
-- Connects to broker via **PAHO over WebSocket** (`ws://localhost:8083/mqtt`)
-- **Identity buttons** with `data-identity` attributes select what to query
-- Query types: Latest, Range, All, Stats, All Identities
-- **Quick Range presets**: Midnight→Now, Midnight→8am, Last 1h, Last 24h
-- **Publish test data** panel for testing
-- Live **MQTT activity log**
-- Auto-discovers new identities from `hippocampus/status` messages
-
----
-
-## Data Model
-
-### DataPoint (JSON)
+Triggered on every `Hippocampus_Request` message. Expected JSON:
 
 ```json
 {
-  "identity"       : "temperature-sensor-1",
-  "epochTimestamp" : 1700000000000,
-  "value"          : "22.5"
+  "Identity": "@ChinampaMonitor:Telepathons:Chinampa:Purpose:SomeValue",
+  "RequestId": "abc123",
+  "Range": 3600000
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `identity` | String | Uniquely identifies what data type this is |
-| `epochTimestamp` | long | Unix epoch in **milliseconds** when data was recorded |
-| `value` | String | The data value (stored as string, interpret as needed) |
-
-### Ingest (publish to `data/ingest`)
-
-Single point:
-```json
-{"identity":"temperature-sensor-1","epochTimestamp":1700000000000,"value":"22.5"}
-```
-
-Batch (array):
-```json
-[
-  {"identity":"temperature-sensor-1","epochTimestamp":1700000000000,"value":"22.5"},
-  {"identity":"humidity-sensor-1","epochTimestamp":1700000000001,"value":"65.3"}
-]
-```
-
-### Query Request (publish to `hippocampus/query`)
+`Range` is milliseconds of history to return, counted back from now. The handler looks up the
+identity's `TreeMap`, takes a `tailMap` slice for the requested range, and publishes the result
+to `Hippocampus_Response/{RequestId}`:
 
 ```json
 {
-  "correlationId" : "abc123",
-  "queryType"     : "RANGE",
-  "identity"      : "temperature-sensor-1",
-  "fromEpoch"     : 1700000000000,
-  "toEpoch"       : 1700086400000
+  "Identity": "@ChinampaMonitor:Telepathons:Chinampa:Purpose:SomeValue",
+  "Data": [
+    {"timeSeconds": 1700000000, "timeString": "2023-11-14 ...", "Value": "22.5"}
+  ],
+  "telepathonName": "Chinampa",
+  "deneWordName": "SomeValue",
+  "RequestId": "abc123"
 }
 ```
 
-**Query Types:** `LATEST` | `RANGE` | `ALL` | `STATS` | `IDENTITIES`
-
-### Query Response (received on `hippocampus/response/{correlationId}`)
-
-```json
-{
-  "correlationId" : "abc123",
-  "queryType"     : "RANGE",
-  "identity"      : "temperature-sensor-1",
-  "timestamp"     : 1700090000000,
-  "result"        : [...],
-  "count"         : 42,
-  "fromEpoch"     : 1700000000000,
-  "toEpoch"       : 1700086400000
-}
-```
+If no data is found for the identity, an empty `Data` array is still published so the
+requester doesn't hang waiting for a response.
 
 ---
 
-## Getting Started
+## Startup Sequence
 
-### Prerequisites
+1. Connect to the MQTT broker at `tcp://localhost:1883`.
+2. Subscribe to `Status` and `Hippocampus_Request`.
+3. `loadData()` — preload historical data from PostgreSQL (via `PostgresqlPersistenceManager`),
+   day by day, going back `preLoadHours` (from Denome config, falling back to
+   `memoryWindowDays * 24`).
+4. `performPostLoadCleanup()` — trim everything to the `memoryWindowDays` rolling window.
+5. Publish `"Preload Complete"` to `Hippocampus_Response`.
+6. Start the daemon `PingThread`, which every 30s writes
+   `/home/pi/Teleonome/HippocampusStatus.json` and publishes the same status to
+   `Hippocampus_Status`.
 
-- Java 11+
-- Maven 3.8+
-- Tomcat 9+ (for webapp)
+---
 
-### Build
+## Memory Management
 
-```bash
-# Build Hippocampus
-cd hippocampus && mvn clean package -q
+- **Global point limit**: 300,000 (`globalLimit`), overridable via Denome config.
+- **Warning threshold**: 270,000 (`warningThreshold`), overridable via Denome config.
+- **Rolling window**: `memoryWindowDays` (default 7, from `hippocampus.properties`) — applied
+  per identity on every `absorbPulse` insert and again as a one-time sweep after preload.
+- **Emergency pruning** (`emergencyPrune()`): once the global limit is hit, removes the single
+  oldest point from *every* identity, one pass at a time, until back under the limit.
 
-# Build Broker
-cd broker && mvn clean package -q
-
-# Build Webapp
-cd webapp && mvn clean package -q
-```
-
-### Run
-
-**Step 1: Start the broker**
-```bash
-java -jar broker/target/hippocampus-broker-1.0.0-jar-with-dependencies.jar
-```
-
-**Step 2: Start the Hippocampus**
-```bash
-# Default: connects to tcp://localhost:1883
-java -jar hippocampus/target/hippocampus-1.0.0-jar-with-dependencies.jar
-
-# Custom broker URL:
-java -Dbroker.url=tcp://mybroker:1883 \
-     -Dmemory.maxPoints=50000 \
-     -jar hippocampus/target/hippocampus-1.0.0-jar-with-dependencies.jar
-```
-
-**Step 3: Deploy webapp to Tomcat**
-```bash
-cp webapp/target/hippocampus-webapp.war $TOMCAT_HOME/webapps/
-```
-
-Then open: `http://localhost:8080/hippocampus-webapp/`
+The `Hippocampus_Status` payload includes a `MemoryBreakdown` (top 15 DeneChains by point
+count, plus an `Other` bucket), current/available point counts, and a recommended `-Xmx`
+heap size derived from observed usage plus sacrificed points.
 
 ---
 
 ## Configuration
 
-### Hippocampus System Properties
+### `hippocampus.properties`
+
+Read from `/home/pi/Teleonome/lib/hippocampus.properties` at startup (a sample copy lives at
+`lib/hippocampus.properties` in this repo for reference — it is **not** the file actually
+loaded at runtime).
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `broker.url` | `tcp://localhost:1883` | MQTT broker TCP URL |
-| `memory.maxPoints` | `10000` | Max DataPoints stored per identity (FIFO eviction) |
-| `status.intervalSec` | `30` | Heartbeat publish interval in seconds |
+| `memory.window.days` | `7` | Rolling memory window; also derives `preLoadHours = days * 24` |
 
-### Moquette (broker/src/main/resources/moquette.conf)
+Missing file falls back to the default silently.
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `port` | `1883` | TCP MQTT port |
-| `websocket_port` | `8083` | WebSocket MQTT port (for browser PAHO) |
-| `allow_anonymous` | `true` | Allow unauthenticated connections |
+### Denome config
 
----
+Read from `Teleonome.denome` (`Utils.getLocalDirectory()`) during preload. Can override
+`globalLimit` and `preLoadHours`, taking precedence over the properties file.
 
-## Example: Querying midnight-to-8am data from the webapp
+### Logging
 
-1. Click the identity button (e.g., `temperature-sensor-1`)
-2. Click **"Midnight → 8am"** quick range preset
-3. Verify the From/To fields show today 00:00 → 08:00
-4. Click **Run Query**
-5. Results appear in the table, sorted by timestamp
-
-Behind the scenes, the webapp:
-1. Publishes to `hippocampus/query`:
-   ```json
-   {"correlationId":"abc123","queryType":"RANGE","identity":"temperature-sensor-1",
-    "fromEpoch":1700000000000,"toEpoch":1700028800000}
-   ```
-2. The Hippocampus runs `memoryStore.getRange("temperature-sensor-1", midnight, 8am)`
-3. Responds on `hippocampus/response/abc123` with matching DataPoints
-4. The webapp receives via PAHO subscription and renders the table
+Configured from `/home/pi/Teleonome/lib/Log4J.properties` at runtime, using the legacy
+`org.apache.log4j` (1.x) API.
 
 ---
 
-## Extending the System
+## Build & Run
 
-**Adding a new identity button in the webapp:**
-```html
-<button class="identity-btn" data-identity="my-sensor-id" onclick="selectIdentity(this)">
-    my-sensor-id
-    <small>Description of this data source</small>
-</button>
-```
+Maven child module of the `organbuilder` parent POM (`../organbuilder/pom.xml`).
 
-**Publishing data from any MQTT client:**
 ```bash
-# Using mosquitto_pub:
-mosquitto_pub -h localhost -p 1883 \
-  -t data/ingest \
-  -m '{"identity":"my-sensor","epochTimestamp":1700000000000,"value":"42"}'
+# Build fat JAR (output goes to ../../Hippocampus.jar)
+mvn clean package
+
+# Run (must be on the Raspberry Pi host or have the /home/pi/Teleonome/ directory structure)
+java -jar ../../Hippocampus.jar
+
+# Run tests
+mvn test
 ```
+
+### Prerequisites
+
+- Java 8 (the pom's `maven.compiler.source/target` says 11, but `maven-compiler-plugin` pins
+  the actual compile target to 1.8)
+- Maven 3.x
+- An external MQTT broker (e.g. Mosquitto) listening on `tcp://localhost:1883`
+- PostgreSQL reachable via the Teleonome framework's `PostgresqlPersistenceManager`
+- `/home/pi/Teleonome/` directory structure (Denome file, properties, Log4J config) present at
+  runtime
+
+---
+
+## Runtime Assumptions
+
+- Hardcoded paths target a Raspberry Pi: `/home/pi/Teleonome/`. Files written at runtime:
+  `HippocampusStatus.json`, `Preload.txt`.
+- Timezone is hardcoded to `Australia/Melbourne`.
+- PostgreSQL is used for historical preload only; all live data arrives via MQTT.
+- `System.gc()` is called explicitly on every `absorbPulse` (intentional, to manage heap on
+  constrained hardware).
