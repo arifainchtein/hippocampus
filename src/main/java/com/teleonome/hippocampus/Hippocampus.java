@@ -147,7 +147,16 @@ public class Hippocampus {
 	        globalLimit = (Integer) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
 
 	        identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_CONFIGURATION, TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_HOURS);
-	        preLoadHours = (Integer) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+	        try {
+	            Integer denomePreLoadHours = (Integer) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+	            if (denomePreLoadHours != null && denomePreLoadHours >= memoryWindowDays * 24) {
+	                preLoadHours = denomePreLoadHours;
+	            } else {
+	                logger.warn("Ignoring stale/short denome Preload Hours (" + denomePreLoadHours + "), using configured default of " + preLoadHours + " hours instead");
+	            }
+	        } catch (Exception denomePreloadEx) {
+	            logger.warn("No usable Preload Hours DeneWord in denome, using configured default of " + preLoadHours + " hours: " + Utils.getStringException(denomePreloadEx));
+	        }
 
 	        // Setup Time Window
 	        ZoneId zone = ZoneId.of("Australia/Melbourne");
