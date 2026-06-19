@@ -136,83 +136,83 @@ public class Hippocampus {
 	        		Thread.sleep(5000);
 	        	}
 	        }while(keepGoing);
-	        
-	      
-	        
-	        
+
+	        // The file root mirrors a live pulse's shape: the actual Denome object (with "Name")
+	        // is nested under "Denome". teleonomeName is otherwise only ever set from a live pulse
+	        // in absorbPulse(), so without this it stays null for the whole of preload.
+	        teleonomeName = denomeJSONObject.getJSONObject("Denome").getString("Name");
+
 	        // Load Configuration from Denome
 	        identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_CONFIGURATION, TeleonomeConstants.DENE_HIPPOCAMPUS_GLOBAL_LIMITS);
 	        globalLimit = (Integer) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
-	        
+
 	        identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_CONFIGURATION, TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_HOURS);
 	        preLoadHours = (Integer) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
-	        
-	        // Setup Time Windows
+
+	        // Setup Time Window
 	        ZoneId zone = ZoneId.of("Australia/Melbourne");
 	        ZonedDateTime now = ZonedDateTime.now(zone);
-	        ZonedDateTime cursor = now.minusHours(preLoadHours);
-	        
+	        long startTimeSeconds = now.minusHours(preLoadHours).toEpochSecond();
+	        long endTimeSeconds = now.toEpochSecond();
+
 	        // --- DATA INGESTION PHASE ---
-	        while (cursor.isBefore(now)) {
-	            ZonedDateTime endOfThisDay = cursor.toLocalDate().atTime(23, 59, 59).atZone(zone);
-	            long startTimeSeconds = cursor.toEpochSecond();
-	            long endTimeSeconds = now.isBefore(endOfThisDay) ? now.toEpochSecond() : endOfThisDay.toEpochSecond();
+	        // Discover every telepathon that actually reported data to Postgres during the
+	        // preload window, instead of only the ones currently listed in the live Denome's
+	        // Hippocampus "Data" dene. This way a device's history is still backfilled even if
+	        // it isn't currently connected/registered when Hippocampus starts.
+	        java.util.List<String> telepathonNames = aDBManager.getDistinctTelepathonNames(startTimeSeconds, endTimeSeconds);
+	        logger.info("Preload: found " + telepathonNames.size() + " distinct telepathons in DB over the last " + preLoadHours + " hours: " + telepathonNames);
 
-	            logger.debug("Processing Day: " + cursor.toLocalDate() + " | Range: " + startTimeSeconds + " to " + endTimeSeconds);
+	        for (String telepathonName : telepathonNames) {
+	            try {
+	                JSONArray telepathonRows = aDBManager.getTelepathonDataStart(telepathonName, startTimeSeconds, endTimeSeconds);
+	                for (int r = 0; r < telepathonRows.length(); r++) {
+	                    JSONObject row = telepathonRows.getJSONObject(r);
+	                    long dataValueSecondsTime = row.getLong("timeSeconds");
+	                    JSONObject telepathonChain = row.getJSONObject("data");
+	                    JSONArray denes = telepathonChain.optJSONArray("Denes");
+	                    if (denes == null) continue;
 
-	            identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_DATA_DENE);
-	            JSONObject dataDene = DenomeUtils.getDeneByIdentity(denomeJSONObject, identity);
-	            JSONArray dataDeneWords = dataDene.getJSONArray("DeneWords");
+	                    for (int d = 0; d < denes.length(); d++) {
+	                        JSONObject dene = denes.getJSONObject(d);
+	                        String deneName = dene.getString(TeleonomeConstants.DENE_NAME_ATTRIBUTE);
+	                        JSONArray storageDataDeneWords = dene.optJSONArray("DeneWords");
+	                        if (storageDataDeneWords == null) continue;
 
-	            for (int i = 0; i < dataDeneWords.length(); i++) {
-	                String valueDenePointer = dataDeneWords.getJSONObject(i).getString(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
-	                Identity valueDenePointerIdentity = new Identity(valueDenePointer);
-	                
-	                JSONObject storageDataDene = (JSONObject) DenomeUtils.getDeneByIdentity(denomeJSONObject, valueDenePointerIdentity);
-	                JSONArray storageDataDeneWords = storageDataDene.getJSONArray("DeneWords");
+	                        for (int j = 0; j < storageDataDeneWords.length(); j++) {
+	                            JSONObject wordObj = storageDataDeneWords.getJSONObject(j);
+	                            String storeDataDeneWordName = wordObj.getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
+	                            String storeDataDeneWordType = wordObj.getString(TeleonomeConstants.DENEWORD_VALUETYPE_ATTRIBUTE);
 
-	                for (int j = 0; j < storageDataDeneWords.length(); j++) {
-	                    JSONObject wordObj = storageDataDeneWords.getJSONObject(j);
-	                    String storeDataDeneWordName = wordObj.getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
-	                    String storeDataDeneWordType = wordObj.getString(TeleonomeConstants.DENEWORD_VALUETYPE_ATTRIBUTE);
-	                    
-	                    if (!storeDataDeneWordType.equals("String") && !storeDataDeneWordType.equals("long")) {
-	                        String storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
+	                            if (!storeDataDeneWordType.equals("String") && !storeDataDeneWordType.equals("long")) {
+	                                Object storageDeneWordValue = wordObj.opt(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+	                                if (storageDeneWordValue == null) continue;
 
-	                        // Fetch from DB
-	                        JSONArray dataItemDatabaseData = aDBManager.getTelepathonDeneWordStart(
-	                                valueDenePointerIdentity.deneChainName, 
-	                                valueDenePointerIdentity.deneName, 
-	                                storeDataDeneWordName, 
-	                                startTimeSeconds, 
-	                                endTimeSeconds);
+	                                String storeDataDeneWordKey = "@" + teleonomeName + ":" + TeleonomeConstants.NUCLEI_TELEPATHONS
+	                                        + ":" + telepathonName + ":" + deneName + ":" + storeDataDeneWordName;
 
-	                        for (int k = 0; k < dataItemDatabaseData.length(); k++) {
-	                            JSONObject point = dataItemDatabaseData.getJSONObject(k);
-	                            long dataValueSecondsTime = point.getLong("timeSeconds");
-	                            Object storageDeneWordValue = point.get("Value");
-
-	                            if (storageDeneWordValue != null) {
 	                                // 1. Memory Safety: Prune if we hit the global limit
 	                                while (totalPoints.get() >= globalLimit) {
-	                                    totalSacrificed += emergencyPrune(); 
+	                                    totalSacrificed += emergencyPrune();
 	                                }
 
 	                                TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, l -> new TreeMap<>());
-	                                
+
 	                                // 2. Add data point
 	                                history.put(dataValueSecondsTime, storageDeneWordValue);
 	                                totalPoints.incrementAndGet();
 	                                pointsAdded++;
-	                                
+
 	                                // NOTE: Time-based pruning removed from here to prevent "data vanishing"
 	                            }
 	                        }
 	                    }
 	                }
+	            } catch (Exception perTelepathonEx) {
+	                // Isolate failures per telepathon: one misconfigured/malformed device must not
+	                // abort preload for every other telepathon found in the database.
+	                logger.warn("Preload failed for telepathon " + telepathonName + ": " + Utils.getStringException(perTelepathonEx));
 	            }
-	            // Advance cursor to start of next day
-	            cursor = cursor.toLocalDate().plusDays(1).atStartOfDay(zone);
 	        }
 
 	        // --- POST-LOAD CLEANUP PHASE ---
@@ -362,64 +362,69 @@ public class Hippocampus {
 				//
 				// valueDenePointer contains something like "@ChinampaMonitor:Telepathons:Chinampa:Purpose"
 				valueDenePointer = dataDeneWords.getJSONObject(i).getString(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
-				valueDenePointerIdentity = new Identity(valueDenePointer);
-				logger.debug("line 254 valueDenePointer=" + valueDenePointer);
-				dataValueDeneChainIdentity = new Identity(valueDenePointerIdentity.getTeleonomeName(), valueDenePointerIdentity.nucleusName, valueDenePointerIdentity.deneChainName);
+				try {
+					valueDenePointerIdentity = new Identity(valueDenePointer);
+					logger.debug("line 254 valueDenePointer=" + valueDenePointer);
+					dataValueDeneChainIdentity = new Identity(valueDenePointerIdentity.getTeleonomeName(), valueDenePointerIdentity.nucleusName, valueDenePointerIdentity.deneChainName);
 
-				logger.debug("line 257 dataValueDeneChainIdentity=" + dataValueDeneChainIdentity.toString());
-				dataValueDeneChain =  (JSONObject) DenomeUtils.getDeneChainByIdentity(denomeJSONObject, dataValueDeneChainIdentity);
+					logger.debug("line 257 dataValueDeneChainIdentity=" + dataValueDeneChainIdentity.toString());
+					dataValueDeneChain =  (JSONObject) DenomeUtils.getDeneChainByIdentity(denomeJSONObject, dataValueDeneChainIdentity);
 
-				if(dataValueDeneChain!=null) {
-					storageDataDene = (JSONObject) DenomeUtils.getDeneByIdentity(denomeJSONObject, valueDenePointerIdentity);
-					if (storageDataDene != null) {
-						storageDataDeneWords = storageDataDene.getJSONArray("DeneWords");
-						// Seconds Time may be a top-level DeneChain attribute (older pulses)
-						// or a DeneWord of type "long" inside the Dene (current structure).
-						dataValueSecondsTime = System.currentTimeMillis() / 1000;
-						if (dataValueDeneChain.has("Seconds Time")) {
-							dataValueSecondsTime = dataValueDeneChain.getLong("Seconds Time");
+					if(dataValueDeneChain!=null) {
+						storageDataDene = (JSONObject) DenomeUtils.getDeneByIdentity(denomeJSONObject, valueDenePointerIdentity);
+						if (storageDataDene != null) {
+							storageDataDeneWords = storageDataDene.getJSONArray("DeneWords");
+							// Seconds Time may be a top-level DeneChain attribute (older pulses)
+							// or a DeneWord of type "long" inside the Dene (current structure).
+							dataValueSecondsTime = System.currentTimeMillis() / 1000;
+							if (dataValueDeneChain.has("Seconds Time")) {
+								dataValueSecondsTime = dataValueDeneChain.getLong("Seconds Time");
+							} else {
+								for (int j = 0; j < storageDataDeneWords.length(); j++) {
+									JSONObject dw = storageDataDeneWords.getJSONObject(j);
+									if ("Seconds Time".equals(dw.getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE))) {
+										dataValueSecondsTime = ((Number) dw.get(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE)).longValue();
+										break;
+									}
+								}
+							}
+							logger.debug("line 263 dataValueSecondsTime=" + dataValueSecondsTime);
+							for(int j=0;j<storageDataDeneWords.length();j++) {
+								storeDataDeneWordName  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
+								storeDataDeneWordType  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_VALUETYPE_ATTRIBUTE);
+								if(!storeDataDeneWordType.equals("String") && !storeDataDeneWordType.equals("long") ) {
+									storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
+									logger.debug("line 292 storeDataDeneWordKey=" + storeDataDeneWordKey);
+
+									checkMemoryHealth();
+									TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, k -> {
+										return new TreeMap<Long, Object>();
+									});
+									identity = new Identity(storeDataDeneWordKey);
+									storageDeneWordValue = DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+									logger.debug("line 300 storageDeneWordValue=" + storageDeneWordValue);
+									if(storageDeneWordValue!=null) {
+										logger.debug("line 303 dataValueSecondsTime=" + dataValueSecondsTime);
+										history.put(dataValueSecondsTime, storageDeneWordValue);
+										totalPoints.incrementAndGet();
+										long windowCutoff = dataValueSecondsTime - (86400L * memoryWindowDays);
+										int removedCount = history.headMap(windowCutoff).size();
+										history.headMap(windowCutoff).clear();
+										totalPoints.addAndGet(-removedCount);
+									}
+								}
+							}
 						} else {
-							for (int j = 0; j < storageDataDeneWords.length(); j++) {
-								JSONObject dw = storageDataDeneWords.getJSONObject(j);
-								if ("Seconds Time".equals(dw.getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE))) {
-									dataValueSecondsTime = ((Number) dw.get(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE)).longValue();
-									break;
-								}
-							}
-						}
-						logger.debug("line 263 dataValueSecondsTime=" + dataValueSecondsTime);
-						for(int j=0;j<storageDataDeneWords.length();j++) {
-							storeDataDeneWordName  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
-							storeDataDeneWordType  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_VALUETYPE_ATTRIBUTE);
-							if(!storeDataDeneWordType.equals("String") && !storeDataDeneWordType.equals("long") ) {
-								storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
-								logger.debug("line 292 storeDataDeneWordKey=" + storeDataDeneWordKey);
-
-								checkMemoryHealth();
-								TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, k -> {
-									return new TreeMap<Long, Object>();
-								});
-								identity = new Identity(storeDataDeneWordKey);
-								storageDeneWordValue = DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
-								logger.debug("line 300 storageDeneWordValue=" + storageDeneWordValue);
-								if(storageDeneWordValue!=null) {
-									logger.debug("line 303 dataValueSecondsTime=" + dataValueSecondsTime);
-									history.put(dataValueSecondsTime, storageDeneWordValue);
-									totalPoints.incrementAndGet();
-									long windowCutoff = dataValueSecondsTime - (86400L * memoryWindowDays);
-									int removedCount = history.headMap(windowCutoff).size();
-									history.headMap(windowCutoff).clear();
-									totalPoints.addAndGet(-removedCount);
-								}
-							}
+							logger.warn("Dene not found for identity: " + valueDenePointerIdentity);
 						}
 					} else {
-						logger.warn("Dene not found for identity: " + valueDenePointerIdentity);
+						logger.warn("DeneChain not found for identity: " + dataValueDeneChainIdentity);
 					}
-				} else {
-					logger.warn("DeneChain not found for identity: " + dataValueDeneChainIdentity);
+				} catch (Exception perPointerEx) {
+					// Isolate failures per device pointer: one misconfigured/missing device must not
+					// stop every other device listed after it in dataDeneWords from being absorbed.
+					logger.warn("absorbPulse failed for pointer " + valueDenePointer + ": " + Utils.getStringException(perPointerEx));
 				}
-
 			}
 		} catch (Exception e) {
 			logger.warn(Utils.getStringException(e));
