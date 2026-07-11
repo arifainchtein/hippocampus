@@ -351,88 +351,101 @@ public class Hippocampus {
 			warningThreshold =  (Integer) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
 			logger.debug("line 232 globalLimit=" + globalLimit + " warningThreshold= " + warningThreshold);
 			//
-			// get the data to store, which are the denewords in the "Data" dene of
-			// 
-			//
+			// "Data" now lists device TYPES to absorb (e.g. "Chinampa", "Daffodil", "Langley"),
+			// not individual device instances. This lets new instances of an already-listed type
+			// (LangleyWest today, Langley_North/Langley_East tomorrow) be absorbed automatically,
+			// without ever touching the denome again -- we discover which instances actually exist
+			// by walking the live pulse's own Telepathons DeneChains every time, the same way
+			// loadData() already discovers telepathons dynamically from Postgres for preload.
 			identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_DATA_DENE);
-			JSONObject dataDene =   DenomeUtils.getDeneByIdentity(denomeJSONObject, identity);
+			JSONObject dataDene = DenomeUtils.getDeneByIdentity(denomeJSONObject, identity);
 			JSONArray dataDeneWords = dataDene.getJSONArray("DeneWords");
-			JSONObject storageDataDene;
-			String valueDenePointer, storeDataDeneWordName,storeDataDeneWordKey ;
-			Identity valueDenePointerIdentity;
-			JSONArray storageDataDeneWords;
-			Object storageDeneWordValue;
-			long dataValueSecondsTime;
-			Identity dataValueDeneChainIdentity;
-			JSONObject dataValueDeneChain;
-			String storeDataDeneWordType;
-			
-			for(int i=0;i<dataDeneWords.length();i++) {
-				//
-				// valueDenePointer contains something like "@ChinampaMonitor:Telepathons:Chinampa:Purpose"
-				valueDenePointer = dataDeneWords.getJSONObject(i).getString(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+			java.util.Set<String> allowedDeviceTypes = new java.util.HashSet<>();
+			for (int i = 0; i < dataDeneWords.length(); i++) {
+				allowedDeviceTypes.add(dataDeneWords.getJSONObject(i).getString(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE));
+			}
+
+			JSONArray telepathonChains = DenomeUtils.getAllDeneChainsForNucleus(denomeJSONObject, TeleonomeConstants.NUCLEI_TELEPATHONS);
+			for (int t = 0; telepathonChains != null && t < telepathonChains.length(); t++) {
+				JSONObject telepathonChain = telepathonChains.getJSONObject(t);
+				String telepathonName = telepathonChain.getString(TeleonomeConstants.DENE_NAME_ATTRIBUTE);
 				try {
-					valueDenePointerIdentity = new Identity(valueDenePointer);
-					logger.debug("line 254 valueDenePointer=" + valueDenePointer);
-					dataValueDeneChainIdentity = new Identity(valueDenePointerIdentity.getTeleonomeName(), valueDenePointerIdentity.nucleusName, valueDenePointerIdentity.deneChainName);
+					JSONArray telepathonDenes = telepathonChain.optJSONArray("Denes");
+					if (telepathonDenes == null) continue;
 
-					logger.debug("line 257 dataValueDeneChainIdentity=" + dataValueDeneChainIdentity.toString());
-					dataValueDeneChain =  (JSONObject) DenomeUtils.getDeneChainByIdentity(denomeJSONObject, dataValueDeneChainIdentity);
-
-					if(dataValueDeneChain!=null) {
-						storageDataDene = (JSONObject) DenomeUtils.getDeneByIdentity(denomeJSONObject, valueDenePointerIdentity);
-						if (storageDataDene != null) {
-							storageDataDeneWords = storageDataDene.getJSONArray("DeneWords");
-							// Seconds Time may be a top-level DeneChain attribute (older pulses)
-							// or a DeneWord of type "long" inside the Dene (current structure).
-							dataValueSecondsTime = System.currentTimeMillis() / 1000;
-							if (dataValueDeneChain.has("Seconds Time")) {
-								dataValueSecondsTime = dataValueDeneChain.getLong("Seconds Time");
-							} else {
-								for (int j = 0; j < storageDataDeneWords.length(); j++) {
-									JSONObject dw = storageDataDeneWords.getJSONObject(j);
-									if ("Seconds Time".equals(dw.getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE))) {
-										dataValueSecondsTime = ((Number) dw.get(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE)).longValue();
-										break;
-									}
+					String deviceType = null;
+					JSONObject storageDataDene = null;
+					for (int d = 0; d < telepathonDenes.length(); d++) {
+						JSONObject dene = telepathonDenes.getJSONObject(d);
+						String deneName = dene.getString(TeleonomeConstants.DENE_NAME_ATTRIBUTE);
+						if (TeleonomeConstants.TELEPATHON_DENE_CONFIGURATION.equals(deneName)) {
+							JSONArray configWords = dene.optJSONArray("DeneWords");
+							for (int c = 0; configWords != null && c < configWords.length(); c++) {
+								JSONObject cw = configWords.getJSONObject(c);
+								if ("Device Type Id".equals(cw.getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE))) {
+									deviceType = cw.optString(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE, null);
 								}
 							}
-							logger.debug("line 263 dataValueSecondsTime=" + dataValueSecondsTime);
-							for(int j=0;j<storageDataDeneWords.length();j++) {
-								storeDataDeneWordName  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
-								storeDataDeneWordType  = storageDataDeneWords.getJSONObject(j).getString(TeleonomeConstants.DENEWORD_VALUETYPE_ATTRIBUTE);
-								if(!storeDataDeneWordType.equals("String") && !storeDataDeneWordType.equals("long") ) {
-									storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
-									logger.debug("line 292 storeDataDeneWordKey=" + storeDataDeneWordKey);
-
-									checkMemoryHealth();
-									TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, k -> {
-										return new TreeMap<Long, Object>();
-									});
-									identity = new Identity(storeDataDeneWordKey);
-									storageDeneWordValue = DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
-									logger.debug("line 300 storageDeneWordValue=" + storageDeneWordValue);
-									if(storageDeneWordValue!=null) {
-										logger.debug("line 303 dataValueSecondsTime=" + dataValueSecondsTime);
-										history.put(dataValueSecondsTime, storageDeneWordValue);
-										totalPoints.incrementAndGet();
-										long windowCutoff = dataValueSecondsTime - (86400L * memoryWindowDays);
-										int removedCount = history.headMap(windowCutoff).size();
-										history.headMap(windowCutoff).clear();
-										totalPoints.addAndGet(-removedCount);
-									}
-								}
-							}
-						} else {
-							logger.warn("Dene not found for identity: " + valueDenePointerIdentity);
+						} else if (TeleonomeConstants.TELEPATHON_DENE_PURPOSE.equals(deneName)) {
+							storageDataDene = dene;
 						}
-					} else {
-						logger.warn("DeneChain not found for identity: " + dataValueDeneChainIdentity);
 					}
-				} catch (Exception perPointerEx) {
-					// Isolate failures per device pointer: one misconfigured/missing device must not
-					// stop every other device listed after it in dataDeneWords from being absorbed.
-					logger.warn("absorbPulse failed for pointer " + valueDenePointer + ": " + Utils.getStringException(perPointerEx));
+
+					if (deviceType == null || !allowedDeviceTypes.contains(deviceType)) continue;
+					if (storageDataDene == null) {
+						logger.warn("No Purpose dene found for telepathon: " + telepathonName);
+						continue;
+					}
+
+					// Build the same storage key shape as before ("@Teleonome:Telepathons:Name:Purpose:DeneWord")
+					// so existing queries (Hippocampus_Request, TeleonomeDataGateway) keep working unchanged.
+					String valueDenePointer = "@" + teleonomeName + ":" + TeleonomeConstants.NUCLEI_TELEPATHONS
+							+ ":" + telepathonName + ":" + TeleonomeConstants.TELEPATHON_DENE_PURPOSE;
+					JSONArray storageDataDeneWords = storageDataDene.getJSONArray("DeneWords");
+
+					// Seconds Time may be a top-level DeneChain attribute (older pulses)
+					// or a DeneWord of type "long" inside the Dene (current structure).
+					long dataValueSecondsTime = System.currentTimeMillis() / 1000;
+					if (telepathonChain.has("Seconds Time")) {
+						dataValueSecondsTime = telepathonChain.getLong("Seconds Time");
+					} else {
+						for (int j = 0; j < storageDataDeneWords.length(); j++) {
+							JSONObject dw = storageDataDeneWords.getJSONObject(j);
+							if ("Seconds Time".equals(dw.getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE))) {
+								dataValueSecondsTime = ((Number) dw.get(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE)).longValue();
+								break;
+							}
+						}
+					}
+					logger.debug("line 263 dataValueSecondsTime=" + dataValueSecondsTime);
+
+					for (int j = 0; j < storageDataDeneWords.length(); j++) {
+						JSONObject dwObj = storageDataDeneWords.getJSONObject(j);
+						String storeDataDeneWordName = dwObj.getString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
+						String storeDataDeneWordType = dwObj.getString(TeleonomeConstants.DENEWORD_VALUETYPE_ATTRIBUTE);
+						if (!storeDataDeneWordType.equals("String") && !storeDataDeneWordType.equals("long")) {
+							String storeDataDeneWordKey = valueDenePointer + ":" + storeDataDeneWordName;
+							logger.debug("line 292 storeDataDeneWordKey=" + storeDataDeneWordKey);
+
+							checkMemoryHealth();
+							TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, k -> new TreeMap<Long, Object>());
+							Object storageDeneWordValue = dwObj.opt(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+							logger.debug("line 300 storageDeneWordValue=" + storageDeneWordValue);
+							if (storageDeneWordValue != null) {
+								logger.debug("line 303 dataValueSecondsTime=" + dataValueSecondsTime);
+								history.put(dataValueSecondsTime, storageDeneWordValue);
+								totalPoints.incrementAndGet();
+								long windowCutoff = dataValueSecondsTime - (86400L * memoryWindowDays);
+								int removedCount = history.headMap(windowCutoff).size();
+								history.headMap(windowCutoff).clear();
+								totalPoints.addAndGet(-removedCount);
+							}
+						}
+					}
+				} catch (Exception perTelepathonEx) {
+					// Isolate failures per telepathon: one misconfigured/missing device must not
+					// stop every other device present in this pulse from being absorbed.
+					logger.warn("absorbPulse failed for telepathon " + telepathonName + ": " + Utils.getStringException(perTelepathonEx));
 				}
 			}
 		} catch (Exception e) {
