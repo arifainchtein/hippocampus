@@ -73,7 +73,7 @@ public class Hippocampus {
 		Properties props = new Properties();
 		try (FileInputStream fis = new FileInputStream(PREFS_FILE)) {
 			props.load(fis);
-			memoryWindowDays = Integer.parseInt(props.getProperty("memory.window.days", "7").trim());
+			memoryWindowDays = Integer.parseInt(props.getProperty("memory.window.days", "1").trim());
 			preLoadHours = memoryWindowDays * 24;
 			logger.warn("Hippocampus preferences loaded: memory.window.days=" + memoryWindowDays
 					+ " preLoadHours=" + preLoadHours);
@@ -676,6 +676,51 @@ public class Hippocampus {
 	        }
 	        // Retrieve the history for this identity
 	        TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.get(id);
+
+	        // Backfill from Postgres whenever the request reaches further back than what's
+	        // currently in memory (e.g. a multi-day chart against a cache that only holds the
+	        // live rolling window). Only the missing older slice is fetched -- whatever's
+	        // already in memory is left alone -- and the fetched rows are merged into the
+	        // in-memory TreeMap so the same range is served from memory next time, without
+	        // ever needing to preload every device's full history up front.
+	        {
+	            long nowSecondsForBackfill = System.currentTimeMillis() / 1000;
+	            long startTsForBackfill = nowSecondsForBackfill - (rangeMs / 1000L);
+	            Long earliestInMemory = (history != null && !history.isEmpty()) ? history.firstKey() : null;
+
+	            if (earliestInMemory == null || earliestInMemory > startTsForBackfill) {
+	                long backfillEndSeconds = (earliestInMemory != null) ? earliestInMemory - 1 : nowSecondsForBackfill;
+	                if (backfillEndSeconds >= startTsForBackfill) {
+	                    try {
+	                        logger.info("Backfilling from Postgres for " + id + ": " + startTsForBackfill + " to " + backfillEndSeconds);
+	                        JSONArray backfillRows = aDBManager.getTelepathonDeneWordStart(
+	                                identity.deneChainName, identity.deneName, identity.deneWordName,
+	                                startTsForBackfill, backfillEndSeconds);
+
+	                        if (history == null) {
+	                            history = new TreeMap<>();
+	                            shortTermMemory.put(id, history);
+	                        }
+	                        int backfilled = 0;
+	                        for (int i = 0; i < backfillRows.length(); i++) {
+	                            JSONObject row = backfillRows.getJSONObject(i);
+	                            long ts = row.getLong("timeSeconds");
+	                            if (!history.containsKey(ts)) {
+	                                while (totalPoints.get() >= globalLimit) {
+	                                    totalSacrificed += emergencyPrune();
+	                                }
+	                                history.put(ts, row.get("Value"));
+	                                totalPoints.incrementAndGet();
+	                                backfilled++;
+	                            }
+	                        }
+	                        logger.info("Backfilled " + backfilled + " points from Postgres for " + id);
+	                    } catch (Exception backfillEx) {
+	                        logger.warn("Backfill from Postgres failed for " + id + ": " + Utils.getStringException(backfillEx));
+	                    }
+	                }
+	            }
+	        }
 
 	        if (history != null && !history.isEmpty()) {
 	            logger.debug("line 465, history found. Points in memory: " + history.size());
