@@ -634,19 +634,33 @@ public class Hippocampus {
 		}
 	}
 
+	// Removes exactly the single globally-oldest point across every tracked identity (true
+	// LRU-by-timestamp). The previous version removed one point from EVERY identity per call,
+	// which round-robins evenly by identity COUNT rather than by data volume: a low-volume
+	// device (e.g. TopTank, ~150 points/day) has its entire day's history wiped out in the
+	// same handful of prune rounds that barely dents a high-volume device (e.g. Langley_West,
+	// ~2700 points/day) -- observed 2026-07-22: TopTank's and Chinampa's in-memory caches were
+	// found completely empty before ~00:05 that day despite Postgres holding full, continuous
+	// history back through the prior evening, while "Sacrificed Points" showed 12441 lifetime
+	// evictions, consistent with a burst of prune rounds hitting the low-volume identities hardest.
 	private int emergencyPrune() {
-	    int removedCount = 0;
-	    // Iterate through every sensor (identity)
-	    for (String identity : shortTermMemory.keySet()) {
-	        TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.get(identity);
+	    String oldestIdentity = null;
+	    long oldestTimestamp = Long.MAX_VALUE;
+	    for (Map.Entry<String, TreeMap> entry : shortTermMemory.entrySet()) {
+	        TreeMap<Long, Object> history = entry.getValue();
 	        if (history != null && !history.isEmpty()) {
-	            // Remove the oldest single value (the first key in the TreeMap)
-	            history.pollFirstEntry(); 
-	            totalPoints.decrementAndGet();
-	            removedCount++;
+	            long firstKey = (Long) history.firstKey();
+	            if (firstKey < oldestTimestamp) {
+	                oldestTimestamp = firstKey;
+	                oldestIdentity = entry.getKey();
+	            }
 	        }
 	    }
-	    return removedCount;
+	    if (oldestIdentity == null) return 0;
+	    TreeMap<Long, Object> oldestHistory = (TreeMap<Long, Object>) shortTermMemory.get(oldestIdentity);
+	    oldestHistory.pollFirstEntry();
+	    totalPoints.decrementAndGet();
+	    return 1;
 	}
 	
 	private void processRequest(String requestJson) {
