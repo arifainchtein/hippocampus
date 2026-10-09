@@ -365,6 +365,9 @@ public class Hippocampus {
 				allowedDeviceTypes.add(dataDeneWords.getJSONObject(i).getString(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE));
 			}
 
+			// Seconds Time of each telepathon absorbed this pulse, so its Cerebellum-computed
+			// values (see absorbCerebellumOutputs) are stamped on the same timeline as its data.
+			java.util.Map<String, Long> absorbedTelepathonSeconds = new java.util.HashMap<>();
 			JSONArray telepathonChains = DenomeUtils.getAllDeneChainsForNucleus(denomeJSONObject, TeleonomeConstants.NUCLEI_TELEPATHONS);
 			for (int t = 0; telepathonChains != null && t < telepathonChains.length(); t++) {
 				JSONObject telepathonChain = telepathonChains.getJSONObject(t);
@@ -418,6 +421,7 @@ public class Hippocampus {
 						}
 					}
 					logger.debug("line 263 dataValueSecondsTime=" + dataValueSecondsTime);
+					absorbedTelepathonSeconds.put(telepathonName, dataValueSecondsTime);
 
 					for (int j = 0; j < storageDataDeneWords.length(); j++) {
 						JSONObject dwObj = storageDataDeneWords.getJSONObject(j);
@@ -448,8 +452,58 @@ public class Hippocampus {
 					logger.warn("absorbPulse failed for telepathon " + telepathonName + ": " + Utils.getStringException(perTelepathonEx));
 				}
 			}
+			absorbCerebellumOutputs(denomeJSONObject, absorbedTelepathonSeconds);
 		} catch (Exception e) {
 			logger.warn(Utils.getStringException(e));
+		}
+	}
+
+	/**
+	 * Absorbs numeric Cerebellum task outputs (e.g. PulseTask's coulomb-counted
+	 * "Battery SOC Live %") that live in Purpose:Cerebellum:<device>, not in the
+	 * device's own Telepathons:<device>:Purpose dene. They are stored under the same
+	 * "@Teleonome:Telepathons:<device>:Purpose:<word>" key the webapp's per-DeneWord
+	 * graph buttons request, mirroring DenomeManager.updateCerebellumPurposeDene()'s
+	 * remembereddenewords write. Only devices absorbed this pulse are considered, and
+	 * each value is stamped with that device's Seconds Time, so a pulse with no new
+	 * device data just overwrites the same point instead of adding a duplicate.
+	 */
+	private void absorbCerebellumOutputs(JSONObject denomeJSONObject, java.util.Map<String, Long> absorbedTelepathonSeconds) {
+		try {
+			JSONObject cerebellumChain = DenomeUtils.getDeneChainByName(denomeJSONObject,
+					TeleonomeConstants.NUCLEI_PURPOSE, TeleonomeConstants.DENECHAIN_PURPOSE_CEREBELLUM);
+			if (cerebellumChain == null) return;
+			JSONArray cerebellumDenes = cerebellumChain.optJSONArray("Denes");
+			for (int i = 0; cerebellumDenes != null && i < cerebellumDenes.length(); i++) {
+				JSONObject deviceDene = cerebellumDenes.getJSONObject(i);
+				String deviceName = deviceDene.optString(TeleonomeConstants.DENE_NAME_ATTRIBUTE);
+				Long secondsTime = absorbedTelepathonSeconds.get(deviceName);
+				if (secondsTime == null) continue;
+				JSONArray words = deviceDene.optJSONArray("DeneWords");
+				for (int j = 0; words != null && j < words.length(); j++) {
+					JSONObject w = words.getJSONObject(j);
+					String wName = w.optString(TeleonomeConstants.DENEWORD_NAME_ATTRIBUTE);
+					// Same filter as DenomeManager.updateCerebellumPurposeDene(): only the
+					// typed double outputs, not the bookkeeping/pointer words.
+					if (wName.isEmpty() || !"double".equals(w.optString(TeleonomeConstants.DENEWORD_VALUETYPE_ATTRIBUTE))
+							|| wName.endsWith("Execution Time") || wName.endsWith("Duration")
+							|| TeleonomeConstants.DENEWORD_CEREBELLUM_ANNABELLE_ACTION_POINTER.equals(wName)
+							|| TeleonomeConstants.DENEWORD_ANNABELLE_COMMAND.equals(wName)) continue;
+					Object value = w.opt(TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+					if (!(value instanceof Number)) continue;
+					String key = "@" + teleonomeName + ":" + TeleonomeConstants.NUCLEI_TELEPATHONS
+							+ ":" + deviceName + ":" + TeleonomeConstants.TELEPATHON_DENE_PURPOSE + ":" + wName;
+					checkMemoryHealth();
+					TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(key, k -> new TreeMap<Long, Object>());
+					if (history.put(secondsTime, value) == null) totalPoints.incrementAndGet();
+					long windowCutoff = secondsTime - (86400L * memoryWindowDays);
+					int removedCount = history.headMap(windowCutoff).size();
+					history.headMap(windowCutoff).clear();
+					totalPoints.addAndGet(-removedCount);
+				}
+			}
+		} catch (Exception e) {
+			logger.warn("absorbCerebellumOutputs failed: " + Utils.getStringException(e));
 		}
 	}
 
@@ -710,6 +764,21 @@ public class Hippocampus {
 	                        JSONArray backfillRows = aDBManager.getTelepathonDeneWordStart(
 	                                identity.deneChainName, identity.deneName, identity.deneWordName,
 	                                startTsForBackfill, backfillEndSeconds);
+
+	                        // Cerebellum-computed values (e.g. "Battery SOC Live %") never appear in the
+	                        // device's raw telepathon rows; DenomeManager.updateCerebellumPurposeDene()
+	                        // writes them to remembereddenewords under this same identity instead.
+	                        if (backfillRows.length() == 0) {
+	                            JSONArray rememberedRows = aDBManager.getRemeberedDeneWordStart(id,
+	                                    startTsForBackfill * 1000L, backfillEndSeconds * 1000L);
+	                            for (int i = 0; i < rememberedRows.length(); i++) {
+	                                JSONObject rr = rememberedRows.getJSONObject(i);
+	                                JSONObject row = new JSONObject();
+	                                row.put("timeSeconds", rr.getLong("Pulse Timestamp in Milliseconds") / 1000L);
+	                                row.put("Value", rr.get("Value"));
+	                                backfillRows.put(row);
+	                            }
+	                        }
 
 	                        if (history == null) {
 	                            history = new TreeMap<>();
