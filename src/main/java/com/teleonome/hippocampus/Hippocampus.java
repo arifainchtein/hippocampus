@@ -761,23 +761,26 @@ public class Hippocampus {
 	                if (backfillEndSeconds >= startTsForBackfill) {
 	                    try {
 	                        logger.info("Backfilling from Postgres for " + id + ": " + startTsForBackfill + " to " + backfillEndSeconds);
-	                        JSONArray backfillRows = aDBManager.getTelepathonDeneWordStart(
-	                                identity.deneChainName, identity.deneName, identity.deneWordName,
-	                                startTsForBackfill, backfillEndSeconds);
-
 	                        // Cerebellum-computed values (e.g. "Battery SOC Live %") never appear in the
 	                        // device's raw telepathon rows; DenomeManager.updateCerebellumPurposeDene()
-	                        // writes them to remembereddenewords under this same identity instead.
+	                        // writes them to remembereddenewords under this same identity instead, and
+	                        // only they are stored there under a Telepathons identity. Check that table
+	                        // first: getTelepathonDeneWordStart() returns a 0.0 row for every device
+	                        // pulse that lacks the word, so it can't be used to detect "not found".
+	                        JSONArray backfillRows = new JSONArray();
+	                        JSONArray rememberedRows = aDBManager.getRemeberedDeneWordStart(id,
+	                                startTsForBackfill * 1000L, backfillEndSeconds * 1000L);
+	                        for (int i = 0; i < rememberedRows.length(); i++) {
+	                            JSONObject rr = rememberedRows.getJSONObject(i);
+	                            JSONObject row = new JSONObject();
+	                            row.put("timeSeconds", rr.getLong("Pulse Timestamp in Milliseconds") / 1000L);
+	                            row.put("Value", rr.get("Value"));
+	                            backfillRows.put(row);
+	                        }
 	                        if (backfillRows.length() == 0) {
-	                            JSONArray rememberedRows = aDBManager.getRemeberedDeneWordStart(id,
-	                                    startTsForBackfill * 1000L, backfillEndSeconds * 1000L);
-	                            for (int i = 0; i < rememberedRows.length(); i++) {
-	                                JSONObject rr = rememberedRows.getJSONObject(i);
-	                                JSONObject row = new JSONObject();
-	                                row.put("timeSeconds", rr.getLong("Pulse Timestamp in Milliseconds") / 1000L);
-	                                row.put("Value", rr.get("Value"));
-	                                backfillRows.put(row);
-	                            }
+	                            backfillRows = aDBManager.getTelepathonDeneWordStart(
+	                                    identity.deneChainName, identity.deneName, identity.deneWordName,
+	                                    startTsForBackfill, backfillEndSeconds);
 	                        }
 
 	                        if (history == null) {
