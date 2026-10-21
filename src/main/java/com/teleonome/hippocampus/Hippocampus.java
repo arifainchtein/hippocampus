@@ -43,6 +43,10 @@ import com.teleonome.framework.utils.Utils;
 public class Hippocampus {
 
 	private final Map<String,TreeMap> shortTermMemory;
+	// Keys known to be Cerebellum outputs (stored in remembereddenewords, never in the
+	// device's raw telepathon rows), so a backfill slice with no remembered rows is not
+	// filled from the telepathon table, which would return a 0.0 for every device pulse.
+	private final java.util.Set<String> cerebellumOutputKeys = java.util.concurrent.ConcurrentHashMap.newKeySet();
 	private MqttClient client;
 	private final String broker = "tcp://localhost:1883"; 
 	//Total data points allowed across the whole Organ
@@ -57,7 +61,9 @@ public class Hippocampus {
 	private PostgresqlPersistenceManager aDBManager;
 	private String teleonomeName;
 	;
-	int preLoadHours=168;
+	// Startup preload is only the last day; older data (up to memoryWindowDays) is
+	// fetched from Postgres on demand by processRequest and then kept in memory.
+	int preLoadHours=24;
 	int memoryWindowDays=7;
 	boolean preLoadDataComplete=false;
 	String processName ;
@@ -74,13 +80,11 @@ public class Hippocampus {
 		try (FileInputStream fis = new FileInputStream(PREFS_FILE)) {
 			props.load(fis);
 			memoryWindowDays = Integer.parseInt(props.getProperty("memory.window.days", "1").trim());
-			preLoadHours = memoryWindowDays * 24;
 			logger.warn("Hippocampus preferences loaded: memory.window.days=" + memoryWindowDays
 					+ " preLoadHours=" + preLoadHours);
 		} catch (Exception e) {
 			logger.warn("Could not load " + PREFS_FILE + ", using defaults (7 days): " + e.getMessage());
 			memoryWindowDays = 7;
-			preLoadHours = 168;
 		}
 	}
 
@@ -149,10 +153,10 @@ public class Hippocampus {
 	        identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_CONFIGURATION, TeleonomeConstants.DENE_HIPPOCAMPUS_PRELOAD_HOURS);
 	        try {
 	            Integer denomePreLoadHours = (Integer) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
-	            if (denomePreLoadHours != null && denomePreLoadHours >= memoryWindowDays * 24) {
+	            if (denomePreLoadHours != null && denomePreLoadHours > 0 && denomePreLoadHours <= memoryWindowDays * 24) {
 	                preLoadHours = denomePreLoadHours;
 	            } else {
-	                logger.warn("Ignoring stale/short denome Preload Hours (" + denomePreLoadHours + "), using configured default of " + preLoadHours + " hours instead");
+	                logger.warn("Ignoring out-of-range denome Preload Hours (" + denomePreLoadHours + "), using default of " + preLoadHours + " hours instead");
 	            }
 	        } catch (Exception denomePreloadEx) {
 	            logger.warn("No usable Preload Hours DeneWord in denome, using configured default of " + preLoadHours + " hours: " + Utils.getStringException(denomePreloadEx));
@@ -172,9 +176,16 @@ public class Hippocampus {
 	        java.util.List<String> telepathonNames = aDBManager.getDistinctTelepathonNames(startTimeSeconds, endTimeSeconds);
 	        logger.info("Preload: found " + telepathonNames.size() + " distinct telepathons in DB over the last " + preLoadHours + " hours: " + telepathonNames);
 
+	        // getTelepathonDataStart materializes every row (full DeneChain JSON) of the window
+	        // in one JSONArray, so asking for the whole preload window at once for a fast-pulsing
+	        // device runs the heap out (OOM on ChinampaMonitor, 2026-10-21). Read it in slices so
+	        // only one slice of raw rows is alive at a time; the extracted points are tiny by comparison.
+	        final long preloadSliceSeconds = 3600L;
 	        for (String telepathonName : telepathonNames) {
+	          for (long sliceStart = startTimeSeconds; sliceStart <= endTimeSeconds; sliceStart += preloadSliceSeconds) {
+	            long sliceEnd = Math.min(sliceStart + preloadSliceSeconds - 1, endTimeSeconds);
 	            try {
-	                JSONArray telepathonRows = aDBManager.getTelepathonDataStart(telepathonName, startTimeSeconds, endTimeSeconds);
+	                JSONArray telepathonRows = aDBManager.getTelepathonDataStart(telepathonName, sliceStart, sliceEnd);
 	                for (int r = 0; r < telepathonRows.length(); r++) {
 	                    JSONObject row = telepathonRows.getJSONObject(r);
 	                    long dataValueSecondsTime = row.getLong("timeSeconds");
@@ -207,10 +218,12 @@ public class Hippocampus {
 
 	                                TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, l -> new TreeMap<>());
 
-	                                // 2. Add data point
-	                                history.put(dataValueSecondsTime, storageDeneWordValue);
-	                                totalPoints.incrementAndGet();
-	                                pointsAdded++;
+	                                // 2. Add data point (only count new timestamps, so totalPoints matches
+	                                // what is really held and the prune loop above can always make progress)
+	                                if (history.put(dataValueSecondsTime, storageDeneWordValue) == null) {
+	                                    totalPoints.incrementAndGet();
+	                                    pointsAdded++;
+	                                }
 
 	                                // NOTE: Time-based pruning removed from here to prevent "data vanishing"
 	                            }
@@ -220,12 +233,13 @@ public class Hippocampus {
 	            } catch (Exception perTelepathonEx) {
 	                // Isolate failures per telepathon: one misconfigured/malformed device must not
 	                // abort preload for every other telepathon found in the database.
-	                logger.warn("Preload failed for telepathon " + telepathonName + ": " + Utils.getStringException(perTelepathonEx));
+	                logger.warn("Preload failed for telepathon " + telepathonName + " slice " + sliceStart + "-" + sliceEnd + ": " + Utils.getStringException(perTelepathonEx));
 	            }
+	          }
 	        }
 
 	        // --- POST-LOAD CLEANUP PHASE ---
-	        // Now that everything is loaded, trim to the 24h rolling window
+	        // Now that everything is loaded, trim to the memoryWindowDays rolling window
 	        performPostLoadCleanup(System.currentTimeMillis() / 1000);
 
 	    } catch (Exception e) {
@@ -493,6 +507,7 @@ public class Hippocampus {
 					if (!(value instanceof Number)) continue;
 					String key = "@" + teleonomeName + ":" + TeleonomeConstants.NUCLEI_TELEPATHONS
 							+ ":" + deviceName + ":" + TeleonomeConstants.TELEPATHON_DENE_PURPOSE + ":" + wName;
+					cerebellumOutputKeys.add(key);
 					checkMemoryHealth();
 					TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(key, k -> new TreeMap<Long, Object>());
 					if (history.put(secondsTime, value) == null) totalPoints.incrementAndGet();
@@ -777,7 +792,9 @@ public class Hippocampus {
 	                            row.put("Value", rr.get("Value"));
 	                            backfillRows.put(row);
 	                        }
-	                        if (backfillRows.length() == 0) {
+	                        if (backfillRows.length() > 0) {
+	                            cerebellumOutputKeys.add(id);
+	                        } else if (!cerebellumOutputKeys.contains(id)) {
 	                            backfillRows = aDBManager.getTelepathonDeneWordStart(
 	                                    identity.deneChainName, identity.deneName, identity.deneWordName,
 	                                    startTsForBackfill, backfillEndSeconds);
@@ -795,9 +812,10 @@ public class Hippocampus {
 	                                while (totalPoints.get() >= globalLimit) {
 	                                    totalSacrificed += emergencyPrune();
 	                                }
-	                                history.put(ts, row.get("Value"));
-	                                totalPoints.incrementAndGet();
-	                                backfilled++;
+	                                if (history.put(ts, row.get("Value")) == null) {
+	                                    totalPoints.incrementAndGet();
+	                                    backfilled++;
+	                                }
 	                            }
 	                        }
 	                        logger.info("Backfilled " + backfilled + " points from Postgres for " + id);
