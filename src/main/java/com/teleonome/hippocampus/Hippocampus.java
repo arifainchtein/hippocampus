@@ -60,7 +60,9 @@ public class Hippocampus {
 	private JSONObject denomeJSONObject;
 	private PostgresqlPersistenceManager aDBManager;
 	private String teleonomeName;
-	;
+	// Last message of every telepathon + the Cerebellum's registry, for the webapp's
+	// Hippocampus modal "Telepathons" tab - see TelepathonRegistryMemory.
+	private TelepathonRegistryMemory telepathonRegistry;
 	// Startup preload is only the last day; older data (up to memoryWindowDays) is
 	// fetched from Postgres on demand by processRequest and then kept in memory.
 	int preLoadHours=24;
@@ -100,6 +102,8 @@ public class Hippocampus {
 		loadPreferences();
 		this.shortTermMemory = new ConcurrentHashMap();
 		aDBManager = PostgresqlPersistenceManager.instance();
+		telepathonRegistry = new TelepathonRegistryMemory(aDBManager);
+		telepathonRegistry.loadSnapshot();
 		try {
 			start();
 		} catch (MqttException e) {
@@ -146,6 +150,11 @@ public class Hippocampus {
 	        // in absorbPulse(), so without this it stays null for the whole of preload.
 	        teleonomeName = denomeJSONObject.getJSONObject("Denome").getString("Name");
 
+	        // Registry as of the last pulse written to disk, so the Telepathons tab has a
+	        // device list (and registered devices missing a last record start seeding from
+	        // Postgres) before the Cerebellum's next sweep arrives on Cerebellum_Status.
+	        absorbRegistryFromDenome(denomeJSONObject);
+
 	        // Load Configuration from Denome
 	        identity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL, TeleonomeConstants.DENECHAIN_INTERNAL_HIPPOCAMPUS, TeleonomeConstants.DENE_HIPPOCAMPUS_CONFIGURATION, TeleonomeConstants.DENE_HIPPOCAMPUS_GLOBAL_LIMITS);
 	        globalLimit = (Integer) DenomeUtils.getDeneWordByIdentity(denomeJSONObject, identity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
@@ -190,6 +199,11 @@ public class Hippocampus {
 	                    JSONObject row = telepathonRows.getJSONObject(r);
 	                    long dataValueSecondsTime = row.getLong("timeSeconds");
 	                    JSONObject telepathonChain = row.getJSONObject("data");
+	                    // Rows come back oldest-first, so the last one of the last slice
+	                    // ends up as this device's last record (newer-wins in any case).
+	                    if (r == telepathonRows.length() - 1) {
+	                        telepathonRegistry.absorbTelepathonRecord(telepathonName, dataValueSecondsTime, telepathonChain);
+	                    }
 	                    JSONArray denes = telepathonChain.optJSONArray("Denes");
 	                    if (denes == null) continue;
 
@@ -314,6 +328,8 @@ public class Hippocampus {
 				try {
 					client.subscribe("Status", 1);
 					client.subscribe("Hippocampus_Request", 1);
+					client.subscribe(TeleonomeConstants.HEART_TOPIC_TELEPATHON_STATUS, 1);
+					client.subscribe(TeleonomeConstants.HEART_TOPIC_CEREBELLUM_STATUS, 1);
 					logger.info("Subscriptions restored");
 				} catch (MqttException e) {
 					logger.warn("Failed to re-subscribe after connect: " + Utils.getStringException(e));
@@ -332,6 +348,18 @@ public class Hippocampus {
 					absorbPulse(payload);
 				} else if (topic.equals("Hippocampus_Request")) {
 					processRequest(payload);
+				} else if (topic.equals(TeleonomeConstants.HEART_TOPIC_TELEPATHON_STATUS)) {
+					try {
+						telepathonRegistry.absorbTelepathonChain(new JSONObject(payload));
+					} catch (Exception e) {
+						logger.warn("Invalid TelepathonStatus payload: " + Utils.getStringException(e));
+					}
+				} else if (topic.equals(TeleonomeConstants.HEART_TOPIC_CEREBELLUM_STATUS)) {
+					try {
+						telepathonRegistry.absorbCerebellumChain(new JSONObject(payload));
+					} catch (Exception e) {
+						logger.warn("Invalid Cerebellum_Status payload: " + Utils.getStringException(e));
+					}
 				}
 			}
 			@Override
@@ -386,6 +414,14 @@ public class Hippocampus {
 			for (int t = 0; telepathonChains != null && t < telepathonChains.length(); t++) {
 				JSONObject telepathonChain = telepathonChains.getJSONObject(t);
 				String telepathonName = telepathonChain.getString(TeleonomeConstants.DENE_NAME_ATTRIBUTE);
+				// Every device, before the Data-dene device-type filter below - the
+				// Telepathons tab shows the whole registry, not just absorbed types.
+				// Backstop for TelepathonStatus (e.g. a message missed while reconnecting).
+				try {
+					telepathonRegistry.absorbTelepathonChain(telepathonChain);
+				} catch (Exception e) {
+					logger.warn("Could not remember last record for telepathon " + telepathonName + ": " + Utils.getStringException(e));
+				}
 				try {
 					JSONArray telepathonDenes = telepathonChain.optJSONArray("Denes");
 					if (telepathonDenes == null) continue;
@@ -467,8 +503,33 @@ public class Hippocampus {
 				}
 			}
 			absorbCerebellumOutputs(denomeJSONObject, absorbedTelepathonSeconds);
+			absorbRegistryFromDenome(denomeJSONObject);
 		} catch (Exception e) {
 			logger.warn(Utils.getStringException(e));
+		}
+	}
+
+	/**
+	 * Reads the Cerebellum's "Telepathon Registry" Dene (Purpose:Cerebellum) and its
+	 * "Days Before Stale" (Internal:Cerebellum:Configuration) out of a pulse or
+	 * Teleonome.denome. Either may be missing (Cerebellum not running yet) - then
+	 * nothing changes.
+	 */
+	private void absorbRegistryFromDenome(JSONObject denomeJSONObject) {
+		try {
+			JSONObject cerebellumChain = DenomeUtils.getDeneChainByName(denomeJSONObject,
+					TeleonomeConstants.NUCLEI_PURPOSE, TeleonomeConstants.DENECHAIN_PURPOSE_CEREBELLUM);
+			if (cerebellumChain != null) telepathonRegistry.absorbCerebellumChain(cerebellumChain);
+		} catch (Exception e) {
+			logger.debug("No Cerebellum registry in denome: " + e.getMessage());
+		}
+		try {
+			Identity staleIdentity = new Identity(teleonomeName, TeleonomeConstants.NUCLEI_INTERNAL,
+					TeleonomeConstants.DENECHAIN_INTERNAL_CEREBELLUM, "Configuration", "Days Before Stale");
+			Object days = DenomeUtils.getDeneWordByIdentity(denomeJSONObject, staleIdentity, TeleonomeConstants.DENEWORD_VALUE_ATTRIBUTE);
+			if (days != null) telepathonRegistry.setDaysBeforeStale(days);
+		} catch (Exception e) {
+			logger.debug("No Days Before Stale in denome: " + e.getMessage());
 		}
 	}
 
@@ -600,6 +661,9 @@ public class Hippocampus {
 				hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
 			}
 
+			hippocampusStatusDeneDeneWord = Utils.createDeneWordJSONObject("Telepathon Last Records", telepathonRegistry.getRecordCount(), null, "int", true);
+			hippocampusDeneWords.put(hippocampusStatusDeneDeneWord);
+
 			// Build MemoryBreakdown from the chainCounts already computed above
 			java.util.List<java.util.Map.Entry<String, Integer>> sortedChains =
 				new java.util.ArrayList<>(chainCounts.entrySet());
@@ -677,6 +741,7 @@ public class Hippocampus {
 					FileUtils.writeStringToFile(new File("/home/pi/Teleonome/HippocampusStatus.json"), hippocampusStatusDene.toString(4));
 					logger.debug("about to broadcasthealth");
 					broadcastHealth();
+					telepathonRegistry.saveSnapshotIfDirty();
 				} catch (IOException e) {
 					// TODO Auto-generated catch block
 					logger.warn(Utils.getStringException(e));
@@ -738,6 +803,17 @@ public class Hippocampus {
 	        JSONObject response = new JSONObject();
 	        JSONObject req = new JSONObject(requestJson);
 	        logger.debug("line 441, request received=" + req.toString());
+
+	        // Webapp Hippocampus modal "Telepathons" tab: every registry device's last
+	        // record + current/stale, answered from memory (no Identity/Range).
+	        if (TelepathonRegistryMemory.REQUEST_TYPE.equals(req.optString("Type"))) {
+	            String registryRequestId = req.optString("RequestId", "default");
+	            JSONObject registryResponse = telepathonRegistry.buildResponse(registryRequestId);
+	            String registryDestination = TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE + "/" + registryRequestId;
+	            client.publish(registryDestination, new MqttMessage(registryResponse.toString().getBytes()));
+	            logger.debug("Telepathon registry response sent to " + registryDestination);
+	            return;
+	        }
 	        
 	        String id = req.getString("Identity").trim();
 	        String requestId = req.optString("RequestId", "default");
