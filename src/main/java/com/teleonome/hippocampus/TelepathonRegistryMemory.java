@@ -46,7 +46,7 @@ import com.teleonome.framework.utils.Utils;
 public class TelepathonRegistryMemory {
 
 	public static final String REQUEST_TYPE = "TelepathonRegistry";
-	public static final String SNAPSHOT_FILE = "/home/pi/Teleonome/HippocampusTelepathonRegistry.json";
+	public static final String SNAPSHOT_FILE = Hippocampus.TELEONOME_DIR + "HippocampusTelepathonRegistry.json";
 
 	private static final String DENE_TELEPATHON_REGISTRY = "Telepathon Registry";
 	private static final String DENEWORD_REGISTRY_DEVICES = "Telepathon Registry Devices";

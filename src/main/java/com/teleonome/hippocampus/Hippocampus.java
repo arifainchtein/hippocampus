@@ -76,7 +76,9 @@ public class Hippocampus {
     private int totalSacrificed = 0;
     private String loadDataDuration = "";
 
-	private static final String PREFS_FILE = "/home/pi/Teleonome/lib/hippocampus.properties";
+	// /home/pi/Teleonome on a Pi; elsewhere (the Factory Teleonome, /home/teleonome/Teleonome) the folder it runs in
+	static final String TELEONOME_DIR = (new java.io.File("/home/pi/Teleonome").isDirectory() ? "/home/pi/Teleonome/" : com.teleonome.framework.utils.Utils.getLocalDirectory());
+	private static final String PREFS_FILE = TELEONOME_DIR + "lib/hippocampus.properties";
 
 	private void loadPreferences() {
 		Properties props = new Properties();
@@ -275,7 +277,7 @@ public class Hippocampus {
 	    // Save status and internal memory map for verification
 	    JSONObject hippocampusStatusDene = generateHippocampusStatusDene();
 	    try {
-	        FileUtils.writeStringToFile(new File("/home/pi/Teleonome/HippocampusStatus.json"), hippocampusStatusDene.toString(4));
+	        FileUtils.writeStringToFile(new File(TELEONOME_DIR + "HippocampusStatus.json"), hippocampusStatusDene.toString(4));
 	        
 	        StringBuilder debugReport = new StringBuilder();
 	        for (String key : shortTermMemory.keySet()) {
@@ -283,7 +285,7 @@ public class Hippocampus {
 	            debugReport.append("key=").append(key).append(" size=").append(size).append(System.lineSeparator());
 	            logger.debug("Final Storage Check: key=" + key + " size=" + size);
 	        }
-	        FileUtils.writeStringToFile(new File("/home/pi/Teleonome/Preload.txt"), debugReport.toString());
+	        FileUtils.writeStringToFile(new File(TELEONOME_DIR + "Preload.txt"), debugReport.toString());
 	        
 	    } catch (IOException e) {
 	        logger.warn(Utils.getStringException(e));
@@ -740,7 +742,7 @@ public class Hippocampus {
 				JSONObject hippocampusStatusDene= generateHippocampusStatusDene();
 				try {
 					logger.debug("about to save status file");
-					FileUtils.writeStringToFile(new File("/home/pi/Teleonome/HippocampusStatus.json"), hippocampusStatusDene.toString(4));
+					FileUtils.writeStringToFile(new File(TELEONOME_DIR + "HippocampusStatus.json"), hippocampusStatusDene.toString(4));
 					logger.debug("about to broadcasthealth");
 					broadcastHealth();
 					telepathonRegistry.saveSnapshotIfDirty();
