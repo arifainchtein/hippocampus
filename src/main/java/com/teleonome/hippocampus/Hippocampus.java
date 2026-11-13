@@ -92,7 +92,8 @@ public class Hippocampus {
 	}
 
 	public Hippocampus() {
-		String fileName =  "/home/pi/Teleonome/lib/Log4J.properties";
+		// the Pis keep it in /home/pi/Teleonome/lib; elsewhere (the Factory Teleonome, /home/teleonome/Teleonome) the lib next to where it runs
+		String fileName =  new java.io.File("/home/pi/Teleonome/lib/Log4J.properties").isFile() ? "/home/pi/Teleonome/lib/Log4J.properties" : com.teleonome.framework.utils.Utils.getLocalDirectory() + "lib/Log4J.properties";
 		System.out.println("reading log4j file at " + fileName);
 		PropertyConfigurator.configure(fileName);
 		logger = Logger.getLogger(getClass());
