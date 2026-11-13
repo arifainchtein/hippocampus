@@ -48,7 +48,8 @@ public class Hippocampus {
 	// filled from the telepathon table, which would return a 0.0 for every device pulse.
 	private final java.util.Set<String> cerebellumOutputKeys = java.util.concurrent.ConcurrentHashMap.newKeySet();
 	private MqttClient client;
-	private final String broker = "tcp://localhost:1883"; 
+	// 1883 unless lib/app.properties says heartPort= (the Factory Teleonome on factory2: 1884)
+	private final String broker = com.teleonome.framework.utils.HeartPorts.localBrokerAddress();
 	//Total data points allowed across the whole Organ
 	private  int globalLimit = 300000; 
 	//Threshold to start warning (90% of limit)
