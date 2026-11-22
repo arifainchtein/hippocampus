@@ -199,6 +199,11 @@ public class Hippocampus {
 	            long sliceEnd = Math.min(sliceStart + preloadSliceSeconds - 1, endTimeSeconds);
 	            try {
 	                JSONArray telepathonRows = aDBManager.getTelepathonDataStart(telepathonName, sliceStart, sliceEnd);
+	                // Live pulses (MQTT thread) arrive during preload and prune the same
+	                // TreeMaps; unsynchronized, that corrupted a map on 2026-11-22 (size > 0,
+	                // no root) and every pulse after it failed. Lock per slice, not the whole
+	                // preload, so pulses only wait for one slice at a time.
+	                synchronized (this) {
 	                for (int r = 0; r < telepathonRows.length(); r++) {
 	                    JSONObject row = telepathonRows.getJSONObject(r);
 	                    long dataValueSecondsTime = row.getLong("timeSeconds");
@@ -231,7 +236,9 @@ public class Hippocampus {
 
 	                                // 1. Memory Safety: Prune if we hit the global limit
 	                                while (totalPoints.get() >= globalLimit) {
-	                                    totalSacrificed += emergencyPrune();
+	                                    int pruned = emergencyPrune();
+	                                    if (pruned == 0) break;
+	                                    totalSacrificed += pruned;
 	                                }
 
 	                                TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.computeIfAbsent(storeDataDeneWordKey, l -> new TreeMap<>());
@@ -248,6 +255,7 @@ public class Hippocampus {
 	                        }
 	                    }
 	                }
+	                } // synchronized (this)
 	            } catch (Exception perTelepathonEx) {
 	                // Isolate failures per telepathon: one misconfigured/malformed device must not
 	                // abort preload for every other telepathon found in the database.
@@ -294,7 +302,7 @@ public class Hippocampus {
 	    
 	}
 	
-	private void performPostLoadCleanup(long nowSeconds) {
+	private synchronized void performPostLoadCleanup(long nowSeconds) {
 	    long windowSeconds = 86400L * memoryWindowDays;
 	    long windowAgo = nowSeconds - windowSeconds;
 	    int totalPruned = 0;
@@ -384,7 +392,7 @@ public class Hippocampus {
 		PingThread aPingThread = new PingThread();
 		aPingThread.start();
 	}
-	private void absorbPulse(String pulseJson) {
+	private synchronized void absorbPulse(String pulseJson) {
 		try {
 			System.gc();
 
@@ -602,6 +610,8 @@ public class Hippocampus {
 			// Earliest/latest epoch seconds currently held per device (deneChainName), across all its DeneWords
 			java.util.Map<String, long[]> chainRanges = new java.util.HashMap<>();
 			int current = 0;
+			// PingThread: hold the same lock as the writers while walking the TreeMaps
+			synchronized (Hippocampus.this) {
 			for (java.util.Map.Entry<String, TreeMap> memEntry : shortTermMemory.entrySet()) {
 				String memKey = memEntry.getKey();
 				TreeMap<Long, Object> memHistory = memEntry.getValue();
@@ -615,9 +625,11 @@ public class Hippocampus {
 					}
 				} catch (Exception ignored) {}
 				chainCounts.merge(groupName, count, Integer::sum);
-				if (!memHistory.isEmpty()) {
-					long firstSeconds = memHistory.firstKey();
-					long lastSeconds = memHistory.lastKey();
+				Map.Entry<Long, Object> firstEntry = memHistory.firstEntry();
+				Map.Entry<Long, Object> lastEntry = memHistory.lastEntry();
+				if (firstEntry != null && lastEntry != null) {
+					long firstSeconds = firstEntry.getKey();
+					long lastSeconds = lastEntry.getKey();
 					chainRanges.merge(groupName, new long[]{firstSeconds, lastSeconds},
 						(a, b) -> new long[]{Math.min(a[0], b[0]), Math.max(a[1], b[1])});
 				}
@@ -626,6 +638,7 @@ public class Hippocampus {
 			// Resync the running counter with what is really held, so any drift (it gates
 			// emergencyPrune) can never outlive one PingThread cycle.
 			totalPoints.set(current);
+			} // synchronized
 			double percentUsed = ((double) current / globalLimit) * 100;
 			int available = globalLimit - current;
 			hippocampusStatusDene.put("Name", TeleonomeConstants.DENE_HIPPOCAMPUS_MEMORY_STATUS_DENE);
@@ -771,7 +784,7 @@ public class Hippocampus {
 
 	}
 
-	private void checkMemoryHealth() {
+	private synchronized void checkMemoryHealth() {
 		int currentSize = totalPoints.get();
 		if (currentSize > globalLimit) {
 			System.out.println("CRITICAL: Memory Limit Exceeded (" + currentSize + "). Emergency Pruning...");
@@ -790,27 +803,35 @@ public class Hippocampus {
 	// found completely empty before ~00:05 that day despite Postgres holding full, continuous
 	// history back through the prior evening, while "Sacrificed Points" showed 12441 lifetime
 	// evictions, consistent with a burst of prune rounds hitting the low-volume identities hardest.
-	private int emergencyPrune() {
+	private synchronized int emergencyPrune() {
 	    String oldestIdentity = null;
 	    long oldestTimestamp = Long.MAX_VALUE;
 	    for (Map.Entry<String, TreeMap> entry : shortTermMemory.entrySet()) {
 	        TreeMap<Long, Object> history = entry.getValue();
-	        if (history != null && !history.isEmpty()) {
-	            long firstKey = (Long) history.firstKey();
-	            if (firstKey < oldestTimestamp) {
-	                oldestTimestamp = firstKey;
-	                oldestIdentity = entry.getKey();
-	            }
+	        if (history == null || history.isEmpty()) continue;
+	        // firstEntry() returns null instead of throwing. A map with size > 0 but no
+	        // first entry is corrupt (from the old preload/pulse race): drop it instead of
+	        // letting it make every prune, and so every pulse, fail.
+	        Map.Entry<Long, Object> first = history.firstEntry();
+	        if (first == null) {
+	            logger.warn("Dropping corrupt history for " + entry.getKey() + " (size " + history.size() + " but no entries)");
+	            totalPoints.addAndGet(-history.size());
+	            shortTermMemory.put(entry.getKey(), new TreeMap<Long, Object>());
+	            continue;
+	        }
+	        if (first.getKey() < oldestTimestamp) {
+	            oldestTimestamp = first.getKey();
+	            oldestIdentity = entry.getKey();
 	        }
 	    }
 	    if (oldestIdentity == null) return 0;
 	    TreeMap<Long, Object> oldestHistory = (TreeMap<Long, Object>) shortTermMemory.get(oldestIdentity);
-	    oldestHistory.pollFirstEntry();
+	    if (oldestHistory.pollFirstEntry() == null) return 0;
 	    totalPoints.decrementAndGet();
 	    return 1;
 	}
 	
-	private void processRequest(String requestJson) {
+	private synchronized void processRequest(String requestJson) {
 	    JSONArray data = new JSONArray();
 	    try {
 	        JSONObject response = new JSONObject();
