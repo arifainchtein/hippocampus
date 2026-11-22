@@ -491,8 +491,14 @@ public class Hippocampus {
 							logger.debug("line 300 storageDeneWordValue=" + storageDeneWordValue);
 							if (storageDeneWordValue != null) {
 								logger.debug("line 303 dataValueSecondsTime=" + dataValueSecondsTime);
-								history.put(dataValueSecondsTime, storageDeneWordValue);
-								totalPoints.incrementAndGet();
+								// Every pulse repeats each device's latest reading under the same
+								// Seconds Time, so only count genuinely new timestamps. Counting every
+								// put made totalPoints drift far above what is really held (2026-11-22:
+								// counter >= 300000 while memory held 127k), which made the backfill in
+								// processRequest() evict each Postgres row right after inserting it.
+								if (history.put(dataValueSecondsTime, storageDeneWordValue) == null) {
+									totalPoints.incrementAndGet();
+								}
 								long windowCutoff = dataValueSecondsTime - (86400L * memoryWindowDays);
 								int removedCount = history.headMap(windowCutoff).size();
 								history.headMap(windowCutoff).clear();
@@ -617,6 +623,9 @@ public class Hippocampus {
 				}
 			}
 
+			// Resync the running counter with what is really held, so any drift (it gates
+			// emergencyPrune) can never outlive one PingThread cycle.
+			totalPoints.set(current);
 			double percentUsed = ((double) current / globalLimit) * 100;
 			int available = globalLimit - current;
 			hippocampusStatusDene.put("Name", TeleonomeConstants.DENE_HIPPOCAMPUS_MEMORY_STATUS_DENE);
@@ -839,6 +848,8 @@ public class Hippocampus {
 	        }
 	        // Retrieve the history for this identity
 	        TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.get(id);
+	        // Rows fetched from Postgres for this request, served even if not kept in memory
+	        TreeMap<Long, Object> backfillServed = new TreeMap<>();
 
 	        // Backfill from Postgres whenever the request reaches further back than what's
 	        // currently in memory (e.g. a multi-day chart against a cache that only holds the
@@ -884,21 +895,24 @@ public class Hippocampus {
 	                            history = new TreeMap<>();
 	                            shortTermMemory.put(id, history);
 	                        }
+	                        // The fetched rows are always served (backfillServed). They're only cached
+	                        // in memory while there's room: the old emergencyPrune loop here evicted
+	                        // the globally oldest point, which is the backfill row just inserted, so
+	                        // at the limit every fetched row was lost before the reply was built.
 	                        int backfilled = 0;
 	                        for (int i = 0; i < backfillRows.length(); i++) {
 	                            JSONObject row = backfillRows.getJSONObject(i);
 	                            long ts = row.getLong("timeSeconds");
-	                            if (!history.containsKey(ts)) {
-	                                while (totalPoints.get() >= globalLimit) {
-	                                    totalSacrificed += emergencyPrune();
-	                                }
+	                            backfillServed.put(ts, row.get("Value"));
+	                            if (!history.containsKey(ts) && totalPoints.get() < globalLimit) {
 	                                if (history.put(ts, row.get("Value")) == null) {
 	                                    totalPoints.incrementAndGet();
 	                                    backfilled++;
 	                                }
 	                            }
 	                        }
-	                        logger.info("Backfilled " + backfilled + " points from Postgres for " + id);
+	                        logger.info("Fetched " + backfillRows.length() + " points from Postgres for " + id
+	                                + ", cached " + backfilled + " in memory");
 	                    } catch (Exception backfillEx) {
 	                        logger.warn("Backfill from Postgres failed for " + id + ": " + Utils.getStringException(backfillEx));
 	                    }
@@ -906,8 +920,8 @@ public class Hippocampus {
 	            }
 	        }
 
-	        if (history != null && !history.isEmpty()) {
-	            logger.debug("line 465, history found. Points in memory: " + history.size());
+	        if ((history != null && !history.isEmpty()) || !backfillServed.isEmpty()) {
+	            logger.debug("line 465, history found. Points in memory: " + (history == null ? 0 : history.size()));
 
 	            // 1. Standardize to Milliseconds
 	            long nowSeconds = System.currentTimeMillis()/1000;
@@ -917,7 +931,8 @@ public class Hippocampus {
 	            logger.debug("Querying from startTs (sec): " + startTsSeconds);
 
 	            // 2. Get the slice (TailMap)
-	            NavigableMap<Long, Object> slice = history.tailMap(startTsSeconds, true);
+	            TreeMap<Long, Object> slice = new TreeMap<>(backfillServed.tailMap(startTsSeconds, true));
+	            if (history != null) slice.putAll(history.tailMap(startTsSeconds, true));
 	            logger.debug("line 465, slice size after time filter=" + slice.size());
 
 	            for (Map.Entry<Long, Object> entry : slice.entrySet()) {
