@@ -324,6 +324,9 @@ public class Hippocampus {
 	
 	public void start() throws MqttException {
 		client = new MqttClient(broker, "Hippocampus_Organ", new MemoryPersistence());
+		// No MQTT call waits for ever (2026-11-26): a publish that gets no PUBACK in time throws instead of hanging
+		// the organ (see RequestThread).
+		client.setTimeToWait(MQTT_TIME_TO_WAIT_MS);
 		MqttConnectOptions options = new MqttConnectOptions();
 		options.setCleanSession(false);
 		options.setAutomaticReconnect(true);
@@ -359,7 +362,7 @@ public class Hippocampus {
 				if (topic.equals("Status")) {
 					absorbPulse(payload);
 				} else if (topic.equals("Hippocampus_Request")) {
-					processRequest(payload);
+					enqueueRequest(payload);   // answered by the RequestThread, never on Paho's callback thread
 				} else if (topic.equals(TeleonomeConstants.HEART_TOPIC_TELEPATHON_STATUS)) {
 					try {
 						telepathonRegistry.absorbTelepathonChain(new JSONObject(payload));
@@ -379,6 +382,7 @@ public class Hippocampus {
 
 		});
 
+		new RequestThread().start();
 		client.connect(options);
 		// connectComplete callback handles initial subscriptions and all re-subscriptions after reconnect
 		logger.info("Hippocampus Active.");
@@ -831,7 +835,51 @@ public class Hippocampus {
 	    return 1;
 	}
 	
-	private synchronized void processRequest(String requestJson) {
+	// ---- Hippocampus_Request (2026-11-26) ----
+	// Requests used to be answered inside messageArrived, holding the Hippocampus lock, with a blocking
+	// client.publish. During a 7-day backfill (6-14 s of Postgres) more messages arrived than Paho's inbound
+	// queue holds (10); Paho's receiver then stopped reading the socket, so the PUBACK the publish waited for was
+	// never read: the organ hung with the lock held, the PingThread could not write HippocampusStatus.json, and
+	// Medula killed it (ChinampaMonitor 2026-11-26 10:06-10:10). Now messageArrived only queues the request,
+	// this thread answers them in order, every MQTT call has a time limit, and Postgres is read without the lock.
+	private static final long MQTT_TIME_TO_WAIT_MS = 30000;
+	private final java.util.concurrent.LinkedBlockingQueue<String> requestQueue = new java.util.concurrent.LinkedBlockingQueue<>();
+
+	// the same request (same identity, range and RequestId) already waiting is not queued twice
+	private void enqueueRequest(String payload) {
+		synchronized (requestQueue) {
+			if (requestQueue.contains(payload)) {
+				logger.debug("Request already queued, ignored: " + payload);
+				return;
+			}
+			requestQueue.add(payload);
+		}
+		if (requestQueue.size() > 20) logger.info("Hippocampus_Request queue: " + requestQueue.size() + " waiting");
+	}
+
+	class RequestThread extends Thread {
+		RequestThread() {
+			super("HippocampusRequests");
+			setDaemon(true);
+		}
+		public void run() {
+			while (true) {
+				String payload;
+				try {
+					payload = requestQueue.take();
+				} catch (InterruptedException e) {
+					return;
+				}
+				try {
+					processRequest(payload);
+				} catch (Throwable t) {
+					logger.warn("Error in processRequest: " + Utils.getStringException(t));
+				}
+			}
+		}
+	}
+
+	private void processRequest(String requestJson) {
 	    JSONArray data = new JSONArray();
 	    try {
 	        JSONObject response = new JSONObject();
@@ -842,7 +890,10 @@ public class Hippocampus {
 	        // record + current/stale, answered from memory (no Identity/Range).
 	        if (TelepathonRegistryMemory.REQUEST_TYPE.equals(req.optString("Type"))) {
 	            String registryRequestId = req.optString("RequestId", "default");
-	            JSONObject registryResponse = telepathonRegistry.buildResponse(registryRequestId);
+	            JSONObject registryResponse;
+	            synchronized (this) {
+	                registryResponse = telepathonRegistry.buildResponse(registryRequestId);
+	            }
 	            String registryDestination = TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE + "/" + registryRequestId;
 	            client.publish(registryDestination, new MqttMessage(registryResponse.toString().getBytes()));
 	            logger.debug("Telepathon registry response sent to " + registryDestination);
@@ -860,15 +911,16 @@ public class Hippocampus {
 	        // Using ISO-like format for Postgres consistency
 	        DateTimeFormatter pgFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
 	                .withZone(melbourneZone);
-	        Iterator it = shortTermMemory.keySet().iterator();
-	        String s;
-	        while(it.hasNext()) {
-	        	s = (String) it.next();
-	        	
-	        	logger.debug("line 486, key=" +s + " size=" + shortTermMemory.get(s).size());
+	        // (the "line 486" dump of every key's size, ~250 lines per request, is gone: it filled HIPPO.txt
+	        // every 25 minutes and walked the TreeMaps without the lock)
+
+	        long nowSeconds = System.currentTimeMillis() / 1000;
+	        long startTsSeconds = nowSeconds - (rangeMs / 1000L);
+	        Long earliestInMemory;
+	        synchronized (this) {
+	            TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.get(id);
+	            earliestInMemory = (history != null && !history.isEmpty()) ? history.firstKey() : null;
 	        }
-	        // Retrieve the history for this identity
-	        TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.get(id);
 	        // Rows fetched from Postgres for this request, served even if not kept in memory
 	        TreeMap<Long, Object> backfillServed = new TreeMap<>();
 
@@ -878,116 +930,99 @@ public class Hippocampus {
 	        // already in memory is left alone -- and the fetched rows are merged into the
 	        // in-memory TreeMap so the same range is served from memory next time, without
 	        // ever needing to preload every device's full history up front.
-	        {
-	            long nowSecondsForBackfill = System.currentTimeMillis() / 1000;
-	            long startTsForBackfill = nowSecondsForBackfill - (rangeMs / 1000L);
-	            Long earliestInMemory = (history != null && !history.isEmpty()) ? history.firstKey() : null;
+	        // The query runs WITHOUT the lock, so pulses and the status file never wait for it.
+	        if (earliestInMemory == null || earliestInMemory > startTsSeconds) {
+	            long backfillEndSeconds = (earliestInMemory != null) ? earliestInMemory - 1 : nowSeconds;
+	            if (backfillEndSeconds >= startTsSeconds) {
+	                try {
+	                    logger.info("Backfilling from Postgres for " + id + ": " + startTsSeconds + " to " + backfillEndSeconds);
+	                    // Cerebellum-computed values (e.g. "Battery SOC Live %") never appear in the
+	                    // device's raw telepathon rows; DenomeManager.updateCerebellumPurposeDene()
+	                    // writes them to remembereddenewords under this same identity instead, and
+	                    // only they are stored there under a Telepathons identity. Check that table
+	                    // first: getTelepathonDeneWordStart() returns a 0.0 row for every device
+	                    // pulse that lacks the word, so it can't be used to detect "not found".
+	                    JSONArray backfillRows = new JSONArray();
+	                    JSONArray rememberedRows = aDBManager.getRemeberedDeneWordStart(id,
+	                            startTsSeconds * 1000L, backfillEndSeconds * 1000L);
+	                    for (int i = 0; i < rememberedRows.length(); i++) {
+	                        JSONObject rr = rememberedRows.getJSONObject(i);
+	                        JSONObject row = new JSONObject();
+	                        row.put("timeSeconds", rr.getLong("Pulse Timestamp in Milliseconds") / 1000L);
+	                        row.put("Value", rr.get("Value"));
+	                        backfillRows.put(row);
+	                    }
+	                    if (backfillRows.length() > 0) {
+	                        cerebellumOutputKeys.add(id);
+	                    } else if (!cerebellumOutputKeys.contains(id)) {
+	                        backfillRows = aDBManager.getTelepathonDeneWordStart(
+	                                identity.deneChainName, identity.deneName, identity.deneWordName,
+	                                startTsSeconds, backfillEndSeconds);
+	                    }
+	                    for (int i = 0; i < backfillRows.length(); i++) {
+	                        JSONObject row = backfillRows.getJSONObject(i);
+	                        backfillServed.put(row.getLong("timeSeconds"), row.get("Value"));
+	                    }
 
-	            if (earliestInMemory == null || earliestInMemory > startTsForBackfill) {
-	                long backfillEndSeconds = (earliestInMemory != null) ? earliestInMemory - 1 : nowSecondsForBackfill;
-	                if (backfillEndSeconds >= startTsForBackfill) {
-	                    try {
-	                        logger.info("Backfilling from Postgres for " + id + ": " + startTsForBackfill + " to " + backfillEndSeconds);
-	                        // Cerebellum-computed values (e.g. "Battery SOC Live %") never appear in the
-	                        // device's raw telepathon rows; DenomeManager.updateCerebellumPurposeDene()
-	                        // writes them to remembereddenewords under this same identity instead, and
-	                        // only they are stored there under a Telepathons identity. Check that table
-	                        // first: getTelepathonDeneWordStart() returns a 0.0 row for every device
-	                        // pulse that lacks the word, so it can't be used to detect "not found".
-	                        JSONArray backfillRows = new JSONArray();
-	                        JSONArray rememberedRows = aDBManager.getRemeberedDeneWordStart(id,
-	                                startTsForBackfill * 1000L, backfillEndSeconds * 1000L);
-	                        for (int i = 0; i < rememberedRows.length(); i++) {
-	                            JSONObject rr = rememberedRows.getJSONObject(i);
-	                            JSONObject row = new JSONObject();
-	                            row.put("timeSeconds", rr.getLong("Pulse Timestamp in Milliseconds") / 1000L);
-	                            row.put("Value", rr.get("Value"));
-	                            backfillRows.put(row);
-	                        }
-	                        if (backfillRows.length() > 0) {
-	                            cerebellumOutputKeys.add(id);
-	                        } else if (!cerebellumOutputKeys.contains(id)) {
-	                            backfillRows = aDBManager.getTelepathonDeneWordStart(
-	                                    identity.deneChainName, identity.deneName, identity.deneWordName,
-	                                    startTsForBackfill, backfillEndSeconds);
-	                        }
-
+	                    // The fetched rows are always served (backfillServed). They're only cached
+	                    // in memory while there's room: the old emergencyPrune loop here evicted
+	                    // the globally oldest point, which is the backfill row just inserted, so
+	                    // at the limit every fetched row was lost before the reply was built.
+	                    int backfilled = 0;
+	                    synchronized (this) {
+	                        TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.get(id);
 	                        if (history == null) {
 	                            history = new TreeMap<>();
 	                            shortTermMemory.put(id, history);
 	                        }
-	                        // The fetched rows are always served (backfillServed). They're only cached
-	                        // in memory while there's room: the old emergencyPrune loop here evicted
-	                        // the globally oldest point, which is the backfill row just inserted, so
-	                        // at the limit every fetched row was lost before the reply was built.
-	                        int backfilled = 0;
-	                        for (int i = 0; i < backfillRows.length(); i++) {
-	                            JSONObject row = backfillRows.getJSONObject(i);
-	                            long ts = row.getLong("timeSeconds");
-	                            backfillServed.put(ts, row.get("Value"));
-	                            if (!history.containsKey(ts) && totalPoints.get() < globalLimit) {
-	                                if (history.put(ts, row.get("Value")) == null) {
-	                                    totalPoints.incrementAndGet();
-	                                    backfilled++;
-	                                }
+	                        for (Map.Entry<Long, Object> row : backfillServed.entrySet()) {
+	                            if (totalPoints.get() >= globalLimit) break;
+	                            if (history.putIfAbsent(row.getKey(), row.getValue()) == null) {
+	                                totalPoints.incrementAndGet();
+	                                backfilled++;
 	                            }
 	                        }
-	                        logger.info("Fetched " + backfillRows.length() + " points from Postgres for " + id
-	                                + ", cached " + backfilled + " in memory");
-	                    } catch (Exception backfillEx) {
-	                        logger.warn("Backfill from Postgres failed for " + id + ": " + Utils.getStringException(backfillEx));
 	                    }
+	                    logger.info("Fetched " + backfillRows.length() + " points from Postgres for " + id
+	                            + ", cached " + backfilled + " in memory");
+	                } catch (Exception backfillEx) {
+	                    logger.warn("Backfill from Postgres failed for " + id + ": " + Utils.getStringException(backfillEx));
 	                }
 	            }
 	        }
 
-	        if ((history != null && !history.isEmpty()) || !backfillServed.isEmpty()) {
-	            logger.debug("line 465, history found. Points in memory: " + (history == null ? 0 : history.size()));
-
-	            // 1. Standardize to Milliseconds
-	            long nowSeconds = System.currentTimeMillis()/1000;
-	            long rangeInSeconds = rangeMs / 1000L;
-	            long startTsSeconds = nowSeconds - rangeInSeconds;
-
-	            logger.debug("Querying from startTs (sec): " + startTsSeconds);
-
-	            // 2. Get the slice (TailMap)
-	            TreeMap<Long, Object> slice = new TreeMap<>(backfillServed.tailMap(startTsSeconds, true));
+	        // The slice: the fetched rows plus what is in memory, copied under the lock
+	        TreeMap<Long, Object> slice = new TreeMap<>(backfillServed.tailMap(startTsSeconds, true));
+	        int inMemory;
+	        synchronized (this) {
+	            TreeMap<Long, Object> history = (TreeMap<Long, Object>) shortTermMemory.get(id);
+	            inMemory = history == null ? 0 : history.size();
 	            if (history != null) slice.putAll(history.tailMap(startTsSeconds, true));
-	            logger.debug("line 465, slice size after time filter=" + slice.size());
-
-	            for (Map.Entry<Long, Object> entry : slice.entrySet()) {
-	                long timeSeconds = entry.getKey();
-	                
-	                // 3. Conversion using Millis
-	                ZonedDateTime zdt = Instant.ofEpochSecond(timeSeconds).atZone(melbourneZone);
-	                String timeString = zdt.format(pgFormatter);
-
-	                JSONObject j = new JSONObject();
-	                j.put("timeSeconds", timeSeconds);
-	                j.put("timeString", timeString);
-	                j.put("Value", entry.getValue());
-	                data.put(j);
-	            }
-
-	            response.put("Identity", id);
-	            response.put("Data", data);
-	            response.put("telepathonName", identity.deneChainName);
-	            response.put("deneWordName", identity.deneWordName);
-	            response.put("RequestId", requestId);
-	            
-	            String destination = TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE + "/" + requestId;
-	            client.publish(destination, new MqttMessage(response.toString().getBytes()));
-	            logger.debug("Response sent to: " + destination + " with " + data.length() + " points.");
-
-	        } else {
-	            logger.warn("Request failed: No data found in memory for Identity: " + id);
-	            // Optionally send an empty response so the browser doesn't hang
-	            response.put("Data", new JSONArray());
-	            response.put("RequestId", requestId);
-	            String destination = TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE + "/" + requestId;
-	            client.publish(destination, new MqttMessage(response.toString().getBytes()));
 	        }
+	        logger.debug("line 465, points in memory: " + inMemory + ", slice size after time filter=" + slice.size());
+	        if (slice.isEmpty() && inMemory == 0) logger.warn("Request failed: No data found in memory for Identity: " + id);
+
+	        for (Map.Entry<Long, Object> entry : slice.entrySet()) {
+	            long timeSeconds = entry.getKey();
+	            ZonedDateTime zdt = Instant.ofEpochSecond(timeSeconds).atZone(melbourneZone);
+	            JSONObject j = new JSONObject();
+	            j.put("timeSeconds", timeSeconds);
+	            j.put("timeString", zdt.format(pgFormatter));
+	            j.put("Value", entry.getValue());
+	            data.put(j);
+	        }
+
+	        // Always the full answer, empty or not: an empty one used to lack telepathonName/deneWordName, so the
+	        // browser could not tell which request it answered and kept waiting for it.
+	        response.put("Identity", id);
+	        response.put("Data", data);
+	        response.put("telepathonName", identity.deneChainName);
+	        response.put("deneWordName", identity.deneWordName);
+	        response.put("RequestId", requestId);
+
+	        String destination = TeleonomeConstants.HEART_TOPIC_HIPPOCAMPUS_RESPONSE + "/" + requestId;
+	        client.publish(destination, new MqttMessage(response.toString().getBytes()));
+	        logger.debug("Response sent to: " + destination + " with " + data.length() + " points.");
 
 	    } catch (Exception e) {
 	        logger.warn("Error in processRequest: " + Utils.getStringException(e));
